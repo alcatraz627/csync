@@ -1,0 +1,57 @@
+#!/bin/bash
+# csync with no arguments: pick a host, then a verb. Uses the std::claude::tui pickers
+# when they are installed and falls back to a numbered prompt otherwise.
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CSYNC="$HERE/csync"
+TUI="${CSYNC_TUI_DIR:-$HOME/.claude/scripts/tui}"
+
+if [ -f "$TUI/pick.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$TUI/colors.sh" 2>/dev/null
+  # shellcheck source=/dev/null
+  . "$TUI/pick.sh"
+else
+  tui_pick_one() {
+    local i=0 line choices=()
+    while IFS= read -r line; do choices+=("$line"); done
+    [ ${#choices[@]} -eq 0 ] && return 1
+    for line in "${choices[@]}"; do i=$((i+1)); printf '%2d) %s\n' "$i" "$line" >&2; done
+    printf '%s ' "${2:-pick:}" >&2
+    read -r n </dev/tty
+    [ -n "$n" ] && [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#choices[@]} ] && printf '%s\n' "${choices[$((n-1))]}"
+  }
+fi
+
+hosts="$("$CSYNC" --json ls | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(d.get("hosts",{})))')"
+if [ -z "$hosts" ]; then
+  echo "no hosts yet. → csync invite <name>" >&2
+  exit 1
+fi
+host="$(printf '%s\n' "$hosts" | tui_pick_one --prompt "host:")" || exit 1
+[ -n "$host" ] || exit 1
+
+verb="$(printf '%s\n' \
+  "sh        interactive shell" \
+  "shot      screenshot" \
+  "info      hardware and devices" \
+  "logs      system and crash logs" \
+  "pull      copy files here" \
+  "push      copy files there" \
+  "run       one command" \
+  "recipe    run a reviewed script" \
+  "open      open a URL or app there" \
+  "say       notification there" \
+  "teardown  end the session" \
+  | tui_pick_one --prompt "$host:")" || exit 1
+verb="${verb%% *}"
+
+case "$verb" in
+  sh|shot|info|logs) exec "$CSYNC" "$verb" "$host" ;;
+  teardown) exec "$CSYNC" teardown "$host" --verify ;;
+  pull|push|run|open|say|recipe)
+    printf 'csync %s %s ' "$verb" "$host" >&2
+    read -r rest </dev/tty
+    # shellcheck disable=SC2086
+    exec "$CSYNC" "$verb" "$host" $rest ;;
+esac

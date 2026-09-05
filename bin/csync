@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Launcher: puts the repo on sys.path and hands over to csync.cli."""
+
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+
+from csync.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

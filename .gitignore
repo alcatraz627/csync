@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.claude/wal.jsonl
+.claude/wal.md
+.claude/skills/shared/locks/
+_*.claude.md
+.DS_Store
