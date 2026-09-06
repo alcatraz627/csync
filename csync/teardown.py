@@ -11,7 +11,8 @@ from .errors import CsyncError, RESIDUE
 
 
 def _cs(h):
-    return h.get("cs") or "~/.csync"
+    # Home-relative fallback, never "~/...": these paths are shell-quoted.
+    return h.get("cs") or ".csync"
 
 
 def plan(h):

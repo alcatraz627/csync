@@ -242,7 +242,12 @@ def main(argv=None):
     try:
         if args.verb == "relay-hello":
             return relay.hello_main(args.invite_id)
-        writing = args.verb not in READ_VERBS and not (args.verb == "recipe" and args.dry_run) and not (args.verb == "teardown" and args.dry_run)
+        writing = (
+            args.verb not in READ_VERBS
+            and not (args.verb == "recipe" and args.dry_run)
+            and not (args.verb == "teardown" and args.dry_run)
+            and not (args.verb == "persist" and args.action == "status")
+        )
         if writing and who == "agent" and not args.allow_write and args.verb not in ("revoke", "forget"):
             raise CsyncError(USAGE, f"{args.verb} changes something, and this call comes from an agent", fix=f"csync --allow-write {' '.join(entry['args'])}")
         if getattr(args, "force", False) and not sys.stdin.isatty():

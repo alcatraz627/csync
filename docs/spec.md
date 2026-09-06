@@ -426,6 +426,21 @@ routes it through a system settings page. `csync persist <name> on` prints the
 exact intent that opens the page, and `off` prints the one that reopens it, so
 the grant stays as easy to withdraw as it was to give.
 
+**Confirmed on hardware, 2026-09-06**, a Redmi Note 10 Pro on Android 13 with
+F-Droid Termux 0.118.3: the bootstrap, the tunnel, `run`, `info`, `push`,
+`pull`, `logs`, `say`, `shot`, `recipe`, `persist`, and teardown all work, and
+the gate refuses a destructive command even over raw ssh. What that run taught,
+which no loopback could:
+
+| Finding | Consequence |
+|---|---|
+| The Play Store Termux carries no matching Termux:API or Termux:Boot | F-Droid is the build to install, and the three apps must come from the same source so their signatures match |
+| Android 12+ kills long-running child processes of an app | the tunnel needs `settings put global settings_enable_monitor_phantom_procs false`, which is one ADB command and survives until a factory reset |
+| `/proc/uptime` is unreadable | the `system` section leaves uptime blank on Android rather than failing |
+| Termux may already be running its own sshd | the bootstrap records whether it started sshd, and teardown stops it only if csync did. Otherwise csync would kill a service the owner started |
+| A remote path is shell-quoted, so `~` never expands | remote defaults are home-relative (`Downloads/csync/`), never `~/...`, which otherwise creates a directory literally named `~` |
+| The phone has no `~/Desktop` | the receipt lands in the home directory instead |
+
 ## The development channel to a phone
 
 `tools/adb-dev.sh` is scaffolding, not a csync feature. It pushes a dev key to a

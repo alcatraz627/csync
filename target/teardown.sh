@@ -35,7 +35,12 @@ fi
 if [ "${os:-}" = android ]; then
   termux-wake-unlock >/dev/null 2>&1 && say "released the wake-lock"
   [ -n "${boot_script:-}" ] && rm -f "$boot_script" && say "removed the boot script"
-  pkill -x sshd >/dev/null 2>&1 && say "stopped the Termux sshd"
+  # Only stop sshd if csync started it; it may be the owner's own service.
+  if [ "${sshd_was_running:-0}" = "1" ]; then
+    say "left the Termux sshd running, it was up before csync"
+  else
+    pkill -x sshd >/dev/null 2>&1 && say "stopped the Termux sshd"
+  fi
 fi
 
 ROOT_NOTE=""

@@ -111,7 +111,9 @@ def _rsync(h, args, capture):
 
 
 def push(h, srcs, dst=None, overwrite=False, dry_run=False, json_mode=False):
-    dst = dst or "~/Downloads/csync/"
+    # Home-relative, never "~/...": the path is shell-quoted, so a tilde would be
+    # taken literally and create a directory actually named ~ (seen on Android).
+    dst = dst or "Downloads/csync/"
     if not dst.endswith("/") and len(srcs) > 1:
         dst += "/"
     subprocess.run(tunnel.ssh_base(h) + [f"mkdir -p {shlex.quote(dst if dst.endswith('/') else os.path.dirname(dst) or '.')}"], capture_output=True)

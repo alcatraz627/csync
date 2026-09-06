@@ -164,9 +164,15 @@ if [ "$OS" = android ]; then
   pkg install -y openssh rsync termux-api >/dev/null 2>&1 || die "pkg install failed; open Termux and run: pkg update"
   changed "installed openssh, rsync, termux-api inside Termux"
   [ -f "$ETC_SSH/ssh_host_ed25519_key" ] || ssh-keygen -A >/dev/null 2>&1
-  pgrep -x sshd >/dev/null 2>&1 || sshd
-  changed "started Termux sshd on port 8022 (no root, keys only)"
-  say "  Termux sshd listening on 8022"
+  if pgrep -x sshd >/dev/null 2>&1; then
+    st sshd_was_running 1
+    say "  Termux sshd was already running on 8022, leaving it alone"
+  else
+    st sshd_was_running 0
+    sshd
+    changed "started Termux sshd on port 8022 (no root, keys only)"
+    say "  Termux sshd listening on 8022"
+  fi
 fi
 
 HK=""
