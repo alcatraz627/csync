@@ -441,6 +441,35 @@ which no loopback could:
 | A remote path is shell-quoted, so `~` never expands | remote defaults are home-relative (`Downloads/csync/`), never `~/...`, which otherwise creates a directory literally named `~` |
 | The phone has no `~/Desktop` | the receipt lands in the home directory instead |
 
+### What a phone can and cannot tell you about itself
+
+Measured on the same device, over csync with ADB disconnected. The limits are
+Android's, not csync's, and they are worth knowing before promising a diagnosis.
+
+| Question | Over csync, no root | Notes |
+|---|---|---|
+| How much memory is in use | yes | `/proc/meminfo` is world-readable, so totals, available, swap and cache all come back |
+| Which processes are heavy | no | Android hides other processes from an unprivileged app, so a process listing shows only csync's own |
+| Load average, page faults, memory pressure | no on this device | MIUI denies `/proc/loadavg`, `/proc/vmstat` and `/proc/pressure` as well |
+| Storage, network, battery, telephony, sensors | yes | through `df` and Termux:API |
+| csync's own footprint | yes | about 18 MB resident: the tunnel's ssh, sshd, and the keeper shell |
+
+The ADB mode closes exactly this gap: `top` and `dumpsys meminfo` over ADB
+return the full per-process table with no root. That is the second reason to
+build it, alongside screen capture.
+
+### The phone as a build machine
+
+`examples/jot` is a tasks app with a home-screen widget that was written on the
+console, pushed over csync, and compiled on the phone with `aapt`, `ecj`, `d8`
+and `apksigner` from Termux. No Gradle and no Android SDK on the Mac. Three
+edit, rebuild and reinstall cycles ran entirely through csync, each build taking
+seconds, producing a signed 17 KB APK.
+
+Installing an APK is the one step Termux cannot do, so it needs ADB or a tap on
+the phone's package installer. Everything up to that point, and everything
+after, runs over the tunnel.
+
 ## The development channel to a phone
 
 `tools/adb-dev.sh` is scaffolding, not a csync feature. It pushes a dev key to a
