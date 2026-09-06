@@ -12,7 +12,7 @@ HEADER = re.compile(r"^#\s*(csync-recipe|os|summary):\s*(.*)$")
 
 
 def parse_header(path):
-    meta = {"name": path.stem, "os": "darwin,linux", "summary": ""}
+    meta = {"name": path.stem, "os": "darwin,linux,android", "summary": ""}
     with open(path) as fh:
         for i, line in enumerate(fh):
             if i > 8:

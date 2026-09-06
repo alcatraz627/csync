@@ -23,7 +23,16 @@ Definition: `docs/spec.md`. Build plan and parity ledger:
 `.claude/output/latest-change-plan.txt` points at it.
 
 Requires on this Mac: macOS 15+, Python 3.12+, Tailscale (for the Funnel route).
-Targets: macOS 13+ or a systemd Linux with bash, curl, and ssh.
+
+Targets: macOS 13+, a systemd Linux including a Raspberry Pi, or an Android phone
+running Termux. Android needs Termux installed once from F-Droid and then takes
+the same paste line, with no root and no sudo at any point. What a phone gives
+you is every verb except a real screen capture, which Android does not allow
+without root, so `csync shot` returns a camera frame and says so.
+
+Always-on behaviour on a phone, the wake-lock and the boot script, is granted
+and withdrawn with `csync persist <name> on|off` and is removed by teardown
+either way.
 
 Tests: `python3 -m unittest discover -s tests` for the token and JSON surface,
 `bash tests/loopback.sh` for the end-to-end run on one machine.

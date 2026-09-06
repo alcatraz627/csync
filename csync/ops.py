@@ -159,13 +159,19 @@ def shot(h, display=1, open_after=False, json_mode=False):
 
 
 SECTIONS = ["system", "cpu", "memory", "disk", "battery", "displays", "usb", "bluetooth", "network", "audio", "camera"]
+ANDROID_SECTIONS = ["telephony", "location", "sensors"]
+
+
+def sections_for(h):
+    return SECTIONS + (ANDROID_SECTIONS if h.get("os") == "android" else [])
 
 
 def info(h, sections=()):
-    bad = [s for s in sections if s not in SECTIONS]
+    allowed = sections_for(h)
+    bad = [s for s in sections if s not in allowed]
     if bad:
-        raise CsyncError(USAGE, f"unknown section {bad[0]!r}", fix="sections: " + " ".join(SECTIONS))
-    rc, out, err = stream_script(h, "info.sh", list(sections) or SECTIONS)
+        raise CsyncError(USAGE, f"unknown section {bad[0]!r}", fix="sections: " + " ".join(allowed))
+    rc, out, err = stream_script(h, "info.sh", list(sections) or allowed)
     parsed = {}
     current = None
     for line in out.splitlines():
@@ -209,3 +215,13 @@ def say(h, text):
     if rc != 0:
         raise CsyncError(REMOTE_FAILED, f"notification failed on {h['name']}: {(err or out).strip()}")
     return {"said": text}
+
+
+def persist(h, action):
+    """Turn the target's always-on behaviour on or off without ending the session."""
+    if action not in ("on", "off", "status"):
+        raise CsyncError(USAGE, "persist takes on, off, or status")
+    rc, out, err = stream_script(h, "persist.sh", [action])
+    if rc != 0:
+        raise CsyncError(REMOTE_FAILED, f"persist {action} failed on {h['name']}: {(err or out).strip()}", fix=f"csync run {h['name']} -- ~/.csync/teardown.sh")
+    return {"action": action, "lines": out.strip().splitlines()}

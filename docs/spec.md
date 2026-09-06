@@ -212,6 +212,7 @@ macOS target the whole script must run under bash 3.2.
 | `csync recipes` | lists recipes with their `# summary:` and `# os:` headers | a table |
 | `csync open <name> <url\|app\|path>` | `open` on macOS, `xdg-open` on Linux, on the target's screen | |
 | `csync say <name> "<text>"` | a notification on the target's screen | |
+| `csync persist <name> [on\|off\|status]` | turns the target's always-on behaviour on or off without ending the session; on Android that is the wake-lock and the boot script | what changed, and the settings intent for the battery grant |
 | `csync teardown <name> [--verify] [--yes] [--dry-run] [--no-receipt]` | shows what will be removed and asks, runs the target's teardown script through the tunnel, copies the session log home, leaves the receipt, then removes the console side | a residue table, empty when clean |
 | `csync forget <name>` | drops a host record whose tunnel is already gone | |
 | `csync` | with no arguments, a picker: host, then command | |
@@ -393,16 +394,52 @@ residue check knows to ignore it; `--no-receipt` removes even that.
 
 ## Operating systems
 
-| Role | Supported in v1 | Notes |
+| Role | Supported | Notes |
 |---|---|---|
 | Console | macOS 15+ (this Mac runs 26.6.2) | Python 3.12+ from the system or Homebrew, Tailscale app or CLI |
 | Target | macOS 13+ | bash 3.2, no python needed |
-| Target | Debian, Ubuntu, Fedora, Arch with systemd | `openssh-server` installed if missing |
-| Target | Windows 10+ | v2: `bootstrap.ps1`, OpenSSH Server capability, `ssh.exe` for the tunnel. The architecture already fits; only the bootstrap differs |
+| Target | Debian, Ubuntu, Fedora, Arch with systemd | `openssh-server` installed if missing. A Raspberry Pi running Raspberry Pi OS is this row, with no Pi-specific code |
+| Target | Android 9+ under Termux | no root and no sudo at any point. Termux installed once from F-Droid, then the same paste line. sshd on 8022, wake-lock and a Termux:Boot script for always-on, both removed by teardown or by `csync persist <name> off` |
+| Target | Windows 10+ | planned: `bootstrap.ps1`, OpenSSH Server capability, `ssh.exe` for the tunnel. The architecture already fits; only the bootstrap differs |
+
+### The Android target in detail
+
+Everything structural is unchanged: the same token, relay, reverse tunnel, gate,
+and teardown. What differs is below, and the whole `sudo` half of the bootstrap
+disappears, because Termux is an unprivileged sandbox with no system service to
+toggle and nothing privileged to restore.
+
+| Concern | Laptop | Android under Termux |
+|---|---|---|
+| Prerequisites | ssh and curl are preinstalled | Termux from F-Droid, then the bootstrap runs `pkg install openssh rsync termux-api` itself |
+| Interpreter | `/bin/bash` | `$PREFIX/bin/bash`; the bootstrap resolves it, because `/bin` does not exist |
+| sshd port | 22 | 8022, which is what a non-root process may bind. The target picks this itself, so the console needs no flag |
+| Privilege | one `sudo` for the service and the TTL daemon | none at all |
+| Staying alive | LaunchAgent or systemd unit | `termux-wake-lock` plus `~/.termux/boot/csync-<id>.sh`, needing the Termux:Boot app |
+| Turning always-on off | not applicable | `csync persist <name> off` releases the lock and deletes the boot script while the session continues; teardown does both anyway |
+| Screenshot | the real screen | a camera frame, front or back. A real screen capture needs root or the ADB mode, and `csync shot` says so rather than returning something misleading |
+| Logs | the system log | only this app's own logcat lines, which Android enforces without root. The digest says so |
+| Extra `info` sections | none | `telephony`, `location`, `sensors`, on top of the usual ones, through Termux:API |
+
+Battery optimisation is the one grant a script cannot revoke, because Android
+routes it through a system settings page. `csync persist <name> on` prints the
+exact intent that opens the page, and `off` prints the one that reopens it, so
+the grant stays as easy to withdraw as it was to give.
+
+## The development channel to a phone
+
+`tools/adb-dev.sh` is scaffolding, not a csync feature. It pushes a dev key to a
+phone over ADB, forwards the phone's 8022 to this Mac, and then everything is
+ordinary ssh, so csync's Android path can be built and tested without a person
+holding the phone. The phone side is three lines pasted into Termux once, and
+`adb-dev.sh phone-lines` prints them. The proper long-running ADB mode, the one
+that would give a real screen capture and the full system log, is separate and
+later.
 
 ## Not in v1
 
-Own-machine persistent `tailnet` route. Windows targets. Remote GUI control
+Own-machine persistent `tailnet` route. Windows targets. The csync ADB mode for
+screen capture and full logs. Remote GUI control
 (macOS Screen Sharing already works over a tailnet with `open vnc://` when the
 target is one of the owner's machines). sshfs mounts. Clipboard sync. A web or
 phone client. Enrollment that keeps private keys off the wire (v1.1, in the

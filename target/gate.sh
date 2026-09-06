@@ -42,17 +42,22 @@ case "$cmd" in
     stamp="$(date +%Y%m%d-%H%M%S)"
     if [ "$(uname -s)" = "Darwin" ]; then
       exec /usr/bin/script -q "$CS/shell-$stamp.log" "${SHELL:-/bin/zsh}" -l
-    else
+    elif command -v script >/dev/null 2>&1; then
       exec script -q -c "${SHELL:-/bin/bash} -l" "$CS/shell-$stamp.log"
+    else
+      # Termux ships no script(1) unless util-linux is installed; say so rather
+      # than pretending the shell was recorded.
+      printf '%s\tinteractive shell NOT recorded (no script command)\n' "$ts" >> "$LOG"
+      exec "${SHELL:-sh}" -l
     fi
     ;;
   sftp|internal-sftp)
-    for s in /usr/libexec/sftp-server /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server /usr/lib/ssh/sftp-server; do
+    for s in "${PREFIX:-/usr}/libexec/sftp-server" /usr/libexec/sftp-server /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server /usr/lib/ssh/sftp-server; do
       [ -x "$s" ] && exec "$s"
     done
     refuse "no sftp server on this machine"
     ;;
   *)
-    exec "${SHELL:-/bin/sh}" -c "$cmd"
+    exec "${SHELL:-sh}" -c "$cmd"
     ;;
 esac

@@ -62,10 +62,30 @@ NOW=$(date +%s)
 OS="$(uname -s)"
 case "$OS" in
   Darwin) OS=darwin; OSVER="$(sw_vers -productVersion 2>/dev/null)" ;;
-  Linux)  OS=linux;  OSVER="$( . /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-linux}" "${VERSION_ID:-}")" ;;
-  *) die "this runs on macOS and Linux; Windows support is planned, not built" ;;
+  Linux)
+    if [ -n "${PREFIX:-}" ] && [ -d "${PREFIX}/bin" ] && case "${PREFIX}" in *com.termux*) true ;; *) false ;; esac; then
+      OS=android; OSVER="$(getprop ro.build.version.release 2>/dev/null)"
+    else
+      OS=linux; OSVER="$( . /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-linux}" "${VERSION_ID:-}")"
+    fi ;;
+  *) die "this runs on macOS, Linux, and Android under Termux; Windows support is planned, not built" ;;
 esac
 ARCH="$(uname -m)"
+
+# Termux has no /bin/bash and no privileged anything: resolve the interpreter and
+# force the no-root path before any step assumes a system service exists.
+BASH_BIN="$(command -v bash)"
+[ -n "$BASH_BIN" ] || die "bash is missing"
+if [ "$OS" = android ]; then
+  NO_ROOT=1
+  NO_LAUNCHD=1
+  TARGET_PORT=8022
+  ETC_SSH="$PREFIX/etc/ssh"
+  command -v pkg >/dev/null 2>&1 || die "this is Termux-shaped but has no pkg; install Termux from F-Droid, not the Play Store"
+else
+  ETC_SSH="/etc/ssh"
+fi
+
 for t in curl ssh; do command -v "$t" >/dev/null 2>&1 || die "$t is missing"; done
 
 H="${DEV_HOME:-$HOME}"
@@ -83,7 +103,7 @@ changed() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" >> "$CS/changes.log"; }
 st v 1; st id "$ID"; st name "$NAME"; st h "$H"; st cs "$CS"; st os "$OS"; st osver "$OSVER"
 st user_name "$ME"; st uid "$(id -u)"; st route "$ROUTE"; st port "$PORT"; st target_port "$TARGET_PORT"
 st console_name "$CONSOLE_NAME"; st created "$NOW"; st created_h "$CREATED_H"; st deadline "$DEADLINE"
-st no_root "$NO_ROOT"
+st no_root "$NO_ROOT"; st bash_bin "$BASH_BIN"; st etc_ssh "$ETC_SSH"
 
 step "csync $NAME: setting this machine up for $CONSOLE_NAME (until $(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M'))"
 
@@ -139,16 +159,31 @@ esac
 st route_used "$USE"
 say "  route: $USE"
 
+if [ "$OS" = android ]; then
+  step "installing openssh, rsync and termux-api (no root, nothing outside Termux)"
+  pkg install -y openssh rsync termux-api >/dev/null 2>&1 || die "pkg install failed; open Termux and run: pkg update"
+  changed "installed openssh, rsync, termux-api inside Termux"
+  [ -f "$ETC_SSH/ssh_host_ed25519_key" ] || ssh-keygen -A >/dev/null 2>&1
+  pgrep -x sshd >/dev/null 2>&1 || sshd
+  changed "started Termux sshd on port 8022 (no root, keys only)"
+  say "  Termux sshd listening on 8022"
+fi
+
 HK=""
 if [ -n "$DEV_HOSTKEY" ]; then
   HK="$(awk '{print $1":"$2}' "$DEV_HOSTKEY.pub" 2>/dev/null)"
 else
-  for f in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ecdsa_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
+  for f in "$ETC_SSH/ssh_host_ed25519_key.pub" "$ETC_SSH/ssh_host_ecdsa_key.pub" "$ETC_SSH/ssh_host_rsa_key.pub"; do
     [ -r "$f" ] && { HK="$(awk '{print $1":"$2}' "$f")"; break; }
   done
 fi
 
-HELLO="hello v=1 id=$ID user=$ME host=$(hostname -s 2>/dev/null || hostname) os=$OS osver=$(printf '%s' "$OSVER" | tr ' ' '_') arch=$ARCH route=$USE sshd_hostkey=$HK deadline=$DEADLINE cs=$CS"
+if [ "$OS" = android ]; then
+  HOSTLABEL="$(getprop ro.product.model 2>/dev/null | tr ' ' '-')"
+fi
+[ -n "${HOSTLABEL:-}" ] || HOSTLABEL="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo device)"
+
+HELLO="hello v=1 id=$ID user=$ME host=$HOSTLABEL os=$OS osver=$(printf '%s' "$OSVER" | tr ' ' '_') arch=$ARCH route=$USE sshd_hostkey=$HK deadline=$DEADLINE cs=$CS"
 if [ "$USE" = "lan" ]; then
   DEST="$RELAY_USER@$LAN_HOST"; PORTOPT="-p $LAN_PORT"; PROXY=""
 else
@@ -157,12 +192,12 @@ else
 fi
 
 cat > "$CS/tunnel.sh" <<EOF
-#!/bin/bash
+#!$BASH_BIN
 # keeps the reverse tunnel to $CONSOLE_NAME alive, and hands over to teardown at the deadline
 CS="$CS"
 while :; do
   now=\$(date +%s)
-  if [ "\$now" -ge "$DEADLINE" ]; then exec /bin/bash "\$CS/teardown.sh" --ttl; fi
+  if [ "\$now" -ge "$DEADLINE" ]; then exec "$BASH_BIN" "\$CS/teardown.sh" --ttl; fi
   ssh -F none -T -i "\$CS/invite_key" -o IdentitiesOnly=yes -o UserKnownHostsFile="\$CS/known_hosts" \\
       -o StrictHostKeyChecking=yes -o HostKeyAlias=csync-relay -o ExitOnForwardFailure=yes \\
       -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o BatchMode=yes -o ConnectTimeout=15 \\
@@ -173,8 +208,21 @@ done
 EOF
 chmod 700 "$CS/tunnel.sh"
 
-if [ $NO_LAUNCHD -eq 1 ]; then
-  nohup /bin/bash "$CS/tunnel.sh" > "$CS/tunnel.log" 2>&1 &
+if [ "$OS" = android ]; then
+  # Doze suspends background processes, so hold a wake-lock and re-arm on boot.
+  # Both are removed by teardown, and neither survives it.
+  termux-wake-lock >/dev/null 2>&1 && changed "held a Termux wake-lock (released at teardown)"
+  nohup "$BASH_BIN" "$CS/tunnel.sh" > "$CS/tunnel.log" 2>&1 &
+  st tunnel_pid "$!"
+  st supervisor "termux"
+  if [ -d "$H/.termux/boot" ] || mkdir -p "$H/.termux/boot" 2>/dev/null; then
+    printf '#!%s\ntermux-wake-lock\nexec %s "%s/tunnel.sh"\n' "$BASH_BIN" "$BASH_BIN" "$CS" > "$H/.termux/boot/csync-$ID.sh"
+    chmod 700 "$H/.termux/boot/csync-$ID.sh"
+    st boot_script "$H/.termux/boot/csync-$ID.sh"
+    changed "added ~/.termux/boot/csync-$ID.sh so the tunnel returns after a reboot (needs the Termux:Boot app; removed at teardown)"
+  fi
+elif [ $NO_LAUNCHD -eq 1 ]; then
+  nohup "$BASH_BIN" "$CS/tunnel.sh" > "$CS/tunnel.log" 2>&1 &
   st tunnel_pid "$!"
   st supervisor "pid"
 elif [ "$OS" = "darwin" ]; then
@@ -271,20 +319,33 @@ EOF
   sed -n 's/^\(CHANGED\|KEPT\): //p' "$TMP/root.out" | while IFS= read -r line; do changed "$line"; done
   sed 's/^/  /' "$TMP/root.out"
   rm -f "$CS/root-setup.sh"
+elif [ "$OS" = android ]; then
+  changed "no root steps on Android: nothing outside Termux was touched"
 else
   changed "root steps skipped (--no-root): the SSH service and the timed cleanup were not touched"
 fi
 
+ENDS_AT="$(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M')"
 if [ "$OS" = "darwin" ]; then
-  osascript -e "display notification \"$CONSOLE_NAME can now reach this Mac until $(date -r "$DEADLINE" '+%H:%M'). Details in Terminal.\" with title \"csync\"" >/dev/null 2>&1
+  osascript -e "display notification \"$CONSOLE_NAME can now reach this Mac until $ENDS_AT. Details in Terminal.\" with title \"csync\"" >/dev/null 2>&1
+elif [ "$OS" = android ]; then
+  termux-notification --title csync --content "$CONSOLE_NAME can reach this phone until $ENDS_AT" >/dev/null 2>&1
 elif command -v notify-send >/dev/null 2>&1; then
   notify-send "csync" "$CONSOLE_NAME can now reach this machine. Details in the terminal." >/dev/null 2>&1
 fi
 
 say ""
-say "  Connected to $CONSOLE_NAME as $ME, until $(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M')."
-say "  They can: run commands as you, copy files both ways, take screenshots, read device info."
-say "  They cannot: use admin rights, or see your passwords."
-say "  Every command they run is written to $CS/session.log."
-say "  To end it now, at any time:  $CS/teardown.sh"
-say "  A receipt lands on your Desktop when it ends."
+say "  Connected to $CONSOLE_NAME as $ME, until $ENDS_AT"
+if [ "$OS" = android ]; then
+  say "  They can: run commands in Termux, copy files both ways, read device info, take a CAMERA photo."
+  say "  They cannot: see your screen, use root, read other apps' data, or see your passwords."
+  say "  Every command they run is written to $CS/session.log"
+  say "  To end it now, at any time:  $CS/teardown.sh"
+  say "  That also releases the wake-lock and removes the boot script."
+else
+  say "  They can: run commands as you, copy files both ways, take screenshots, read device info."
+  say "  They cannot: use admin rights, or see your passwords."
+  say "  Every command they run is written to $CS/session.log"
+  say "  To end it now, at any time:  $CS/teardown.sh"
+  say "  A receipt lands on your Desktop when it ends."
+fi

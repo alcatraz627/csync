@@ -14,7 +14,7 @@ from .envcfg import env
 from .errors import USAGE, CsyncError
 
 READ_VERBS = {"ls", "status", "log", "wait", "pull", "shot", "info", "logs", "recipes", "doctor", "recipe-dry"}
-HOST_VERBS = {"wait", "sh", "run", "push", "pull", "shot", "info", "logs", "recipe", "open", "say", "teardown"}
+HOST_VERBS = {"wait", "sh", "run", "push", "pull", "shot", "info", "logs", "recipe", "open", "say", "teardown", "persist"}
 
 
 def actor():
@@ -118,6 +118,10 @@ def build_parser():
     s = sp.add_parser("say", help="show a notification on the host's screen")
     s.add_argument("name")
     s.add_argument("text")
+
+    s = sp.add_parser("persist", help="turn the host's always-on behaviour on or off (Android wake-lock and boot script)")
+    s.add_argument("name")
+    s.add_argument("action", nargs="?", default="status", choices=["on", "off", "status"])
 
     s = sp.add_parser("teardown", help="undo the session on both ends")
     s.add_argument("name")
@@ -388,6 +392,15 @@ def main(argv=None):
             result = ops.say(h, args.text)
             if not args.json:
                 out_human(emit.dim(f"→ shown on {name}"))
+        elif args.verb == "persist":
+            if args.action != "status" and who == "agent" and not args.allow_write:
+                raise CsyncError(USAGE, "persist changes the host, and this call comes from an agent", fix=f"csync --allow-write persist {name} {args.action}")
+            tunnel.require_online(h, 20)
+            result = ops.persist(h, args.action)
+            if not args.json:
+                for line in result["lines"]:
+                    out_human("  " + line)
+                out_human(emit.dim(f"→ csync persist {name} off   ends always-on without ending the session"))
         elif args.verb == "teardown":
             if args.dry_run:
                 result = teardown.run(h, dry_run=True)

@@ -1,9 +1,13 @@
 #!/bin/bash
 # Hardware and device summary. Args are section names; prints "## section" then its lines.
 os="$(uname -s)"
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then
+  case "$PREFIX" in *com.termux*) os=Android ;; esac
+fi
 cap() { head -n 60; }
 sec() { printf '## %s\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+prop() { getprop "$1" 2>/dev/null; }
 
 for s in "$@"; do
   sec "$s"
@@ -20,6 +24,27 @@ for s in "$@"; do
       network)   for i in en0 en1; do ip="$(ipconfig getifaddr $i 2>/dev/null)"; [ -n "$ip" ] && printf '%s %s\n' "$i" "$ip"; done; networksetup -getairportnetwork en0 2>/dev/null; scutil --nwi 2>/dev/null | head -n 12 ;;
       audio)     system_profiler SPAudioDataType 2>/dev/null | sed 's/^ *//' | grep -Ei '^[^:]+:$|Default|Input|Output' | cap ;;
       camera)    system_profiler SPCameraDataType 2>/dev/null | sed 's/^ *//' | cap ;;
+      *)         printf 'unknown section\n' ;;
+    esac
+  elif [ "$os" = "Android" ]; then
+    case "$s" in
+      system)    printf 'model %s\nmanufacturer %s\ndevice %s\nandroid %s (sdk %s)\nsecurity patch %s\nbuild %s\n' \
+                   "$(prop ro.product.model)" "$(prop ro.product.manufacturer)" "$(prop ro.product.device)" \
+                   "$(prop ro.build.version.release)" "$(prop ro.build.version.sdk)" "$(prop ro.build.version.security_patch)" "$(prop ro.build.display.id)"
+                 printf 'uptime %s\n' "$(cut -d. -f1 /proc/uptime 2>/dev/null) s" ;;
+      cpu)       prop ro.soc.model; grep -m1 'Hardware' /proc/cpuinfo 2>/dev/null; printf 'cores %s\nabi %s\n' "$(nproc 2>/dev/null)" "$(prop ro.product.cpu.abi)"; cat /proc/loadavg 2>/dev/null ;;
+      memory)    grep -E 'MemTotal|MemAvailable|SwapTotal' /proc/meminfo 2>/dev/null ;;
+      disk)      df -h "$HOME" /storage/emulated/0 2>/dev/null | cap ;;
+      battery)   have termux-battery-status && termux-battery-status || printf 'termux-api not installed\n' ;;
+      displays)  have termux-window-manager && termux-window-manager 2>/dev/null; printf 'density %s\n' "$(prop ro.sf.lcd_density)"; have wm && wm size 2>/dev/null ;;
+      usb)       ls /sys/bus/usb/devices 2>/dev/null | cap || printf 'no usb listing without root\n' ;;
+      bluetooth) have termux-bluetooth-scaninfo && printf 'use termux-bluetooth-scaninfo interactively\n' || printf 'bluetooth needs termux-api and a permission grant\n' ;;
+      network)   have termux-wifi-connectioninfo && termux-wifi-connectioninfo; ip -brief addr 2>/dev/null | cap ;;
+      audio)     have termux-audio-info && termux-audio-info || printf 'termux-api not installed\n' ;;
+      camera)    have termux-camera-info && termux-camera-info || printf 'termux-api not installed\n' ;;
+      telephony) have termux-telephony-deviceinfo && termux-telephony-deviceinfo || printf 'termux-api not installed\n' ;;
+      location)  have termux-location && termux-location -p network 2>/dev/null || printf 'termux-api not installed, or location permission not granted\n' ;;
+      sensors)   have termux-sensor && termux-sensor -l 2>/dev/null | cap || printf 'termux-api not installed\n' ;;
       *)         printf 'unknown section\n' ;;
     esac
   else

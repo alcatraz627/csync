@@ -32,8 +32,16 @@ if [ -e "$AK" ]; then
   say "removed the console's key"
 fi
 
+if [ "${os:-}" = android ]; then
+  termux-wake-unlock >/dev/null 2>&1 && say "released the wake-lock"
+  [ -n "${boot_script:-}" ] && rm -f "$boot_script" && say "removed the boot script"
+  pkill -x sshd >/dev/null 2>&1 && say "stopped the Termux sshd"
+fi
+
 ROOT_NOTE=""
-if [ "$no_root" = "1" ]; then
+if [ "${os:-}" = android ]; then
+  ROOT_NOTE="Android: nothing outside Termux was ever changed, so nothing needed restoring"
+elif [ "$no_root" = "1" ]; then
   ROOT_NOTE="root steps were skipped at setup, nothing to restore"
 elif [ "$MODE" = "fromroot" ]; then
   ROOT_NOTE="root half already running"
@@ -54,7 +62,9 @@ fi
 RES=0
 residue() { say "RESIDUE: $1"; RES=1; }
 grep -q "# csync:$id\$" "$AK" 2>/dev/null && residue "authorized_keys still carries the csync line"
-if [ "$no_root" != "1" ]; then
+if [ "${os:-}" = android ]; then
+  [ -n "${boot_script:-}" ] && [ -e "${boot_script:-}" ] && residue "boot script still at $boot_script"
+elif [ "$no_root" != "1" ]; then
   [ -e /etc/ssh/sshd_config.d/000-csync.conf ] && residue "/etc/ssh/sshd_config.d/000-csync.conf still present"
   if [ "$MODE" != "fromroot" ] && [ ! -e "$CS/root.done" ]; then
     residue "root cleanup did not report back, Remote Login may still be on"
@@ -97,6 +107,8 @@ fi
 
 if [ "$os" = "darwin" ]; then
   osascript -e 'display notification "Session ended. Everything csync set up has been removed." with title "csync"' >/dev/null 2>&1
+elif [ "$os" = android ]; then
+  termux-notification --title csync --content "Session ended. Everything csync set up has been removed." >/dev/null 2>&1
 elif command -v notify-send >/dev/null 2>&1; then
   notify-send "csync" "Session ended. Everything csync set up has been removed." >/dev/null 2>&1
 fi
@@ -115,6 +127,8 @@ stop_tunnel() {
     rm -f "$h/Library/LaunchAgents/sh.csync.tunnel.plist"
   elif [ "${supervisor:-}" = "systemd" ]; then
     systemctl --user stop csync-tunnel.service 2>/dev/null
+  elif [ "${supervisor:-}" = "termux" ]; then
+    pkill -f "$CS/tunnel.sh" 2>/dev/null
   fi
 }
 

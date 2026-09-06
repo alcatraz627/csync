@@ -211,7 +211,7 @@ def hello_main(invite_id):
                 "user": fields.get("user"),
                 "host": fields.get("host"),
                 "os": fields.get("os"),
-                "os_label": {"darwin": "macOS", "linux": "Linux"}.get(fields.get("os"), fields.get("os")),
+                "os_label": {"darwin": "macOS", "linux": "Linux", "android": "Android"}.get(fields.get("os"), fields.get("os")),
                 "osver": fields.get("osver"),
                 "arch": fields.get("arch"),
                 "route_used": fields.get("route"),

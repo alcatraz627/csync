@@ -10,6 +10,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 os="$(uname -s)"
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then
+  case "$PREFIX" in *com.termux*) os=Android ;; esac
+fi
 stamp="$(date +%Y%m%d-%H%M%S)"
 d="$(mktemp -d "${TMPDIR:-/tmp}/csync-logs.XXXXXX")"
 out="${TMPDIR:-/tmp}/csync-logs-$stamp.tar.gz"
@@ -28,6 +31,27 @@ if [ "$os" = "Darwin" ]; then
   printf 'noisiest processes:\n'
   awk '{print $4}' "$d/errors-and-faults-last-$since.log" | sed 's/\[.*//' | sort | uniq -c | sort -rn | head -n 8 | sed 's/^/  /'
   [ $crash -eq 1 ] && printf 'crash reports (7 days): %s\n' "$(ls "$d/crash" 2>/dev/null | wc -l | tr -d ' ')"
+elif [ "$os" = "Android" ]; then
+  # Without root, logcat returns only this app's own lines. Say that rather than
+  # implying a full system log; the ADB mode is what reads the whole buffer.
+  if command -v logcat >/dev/null 2>&1; then
+    logcat -d -v time 2>/dev/null | head -n 20000 > "$d/logcat-visible.log"
+    if [ -n "$app" ]; then
+      grep -i "$app" "$d/logcat-visible.log" > "$d/logcat-$app.log" 2>/dev/null
+    fi
+    lines="$(wc -l < "$d/logcat-visible.log" | tr -d ' ')"
+    printf 'logcat lines visible to this app: %s\n' "$lines"
+    [ "$lines" -lt 5 ] && printf 'note: Android hides other apps logs without root; use the ADB mode for the full buffer\n'
+    printf 'busiest tags:\n'
+    awk '{print $6}' "$d/logcat-visible.log" 2>/dev/null | sed 's/(.*//' | sort | uniq -c | sort -rn | head -n 8 | sed 's/^/  /'
+  else
+    printf 'no logcat on PATH\n' > "$d/logcat-visible.log"
+    printf 'logcat is not available in this Termux install\n'
+  fi
+  printf 'device: %s, android %s\n' "$(getprop ro.product.model 2>/dev/null)" "$(getprop ro.build.version.release 2>/dev/null)"
+  if [ $crash -eq 1 ]; then
+    printf 'crash reports need the ADB mode on Android\n'
+  fi
 else
   case "$since" in
     *h) js="${since%h} hours ago" ;;
