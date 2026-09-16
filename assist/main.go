@@ -111,7 +111,7 @@ func serve() error {
 			req.Session = "default"
 		}
 		history := sessions.append(req.Session, gContent{Role: "user", Parts: []gPart{{Text: req.Message}}})
-		reply, err := callGemini(key, m, systemPrompt(), history)
+		reply, err := runChat(key, m, systemPrompt(), history)
 		if err != nil {
 			log.Printf("chat error (session %s): %v", req.Session, err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -141,6 +141,39 @@ func serve() error {
 	return srv.ListenAndServe()
 }
 
+// runChat drives one user turn to a text answer, letting the model call tools in
+// between. Each functionCall is executed and its result replayed, up to a cap so
+// a misbehaving loop cannot run forever.
+func runChat(key, model, system string, history []gContent) (string, error) {
+	working := make([]gContent, len(history))
+	copy(working, history)
+	sys := &gContent{Parts: []gPart{{Text: system}}}
+	tools := toolDeclarations()
+
+	for step := 0; step < 8; step++ {
+		content, err := generate(key, model, gRequest{
+			SystemInstruction: sys, Contents: working, Tools: tools,
+		})
+		if err != nil {
+			return "", err
+		}
+		calls := functionCalls(content)
+		if len(calls) == 0 {
+			return firstText(content), nil
+		}
+		working = append(working, content) // the model's tool-call turn
+		var responses []gPart
+		for _, fc := range calls {
+			result := executeTool(fc.Name, fc.Args)
+			responses = append(responses, gPart{
+				FunctionResponse: &gFunctionResponse{Name: fc.Name, Response: result},
+			})
+		}
+		working = append(working, gContent{Role: functionResponseRole, Parts: responses})
+	}
+	return "", fmt.Errorf("gave up after 8 tool steps without a final answer")
+}
+
 func authed(w http.ResponseWriter, r *http.Request, token string) bool {
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Csync-Token")), []byte(token)) == 1 {
 		return true
@@ -164,7 +197,7 @@ func cmdAsk(args []string) error {
 	if err != nil {
 		return err
 	}
-	reply, err := callGemini(key, model(), systemPrompt(),
+	reply, err := runChat(key, model(), systemPrompt(),
 		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}})
 	if err != nil {
 		return err
