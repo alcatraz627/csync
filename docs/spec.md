@@ -267,7 +267,7 @@ without asking.
 | Record | Where | Written by | Holds | Read with |
 |---|---|---|---|---|
 | Console audit journal | `~/.local/state/csync/audit.jsonl` | every `csync` command, including failures | time, host, verb, full args, actor (human or agent), exit, duration, files moved, bytes | `csync log [name] [--last 20] [--json]` |
-| Target session log | `~/.csync/session.log` on the target | `gate.sh`, the forced command in front of every SSH session | every command the console ran, as the target saw it; interactive shells recorded with `script` to `~/.csync/shell-<ts>.log` | the friend, any time; copied to `~/csync/<name>/session/` at teardown |
+| Target session log | `~/.csync/session.log` on the target | `gate.sh`, the forced command in front of every SSH session | every command the console ran, as the target saw it, with a plain-language note beside the streamed verbs; interactive shells recorded with `script` to `~/.csync/shell-<ts>.log` | the friend, any time; copied to `~/csync/<name>/session/` at teardown |
 | Relay log | `~/.config/csync/relay/sshd.log` | the relay sshd at `LogLevel VERBOSE` | tunnel up and down, refused keys, hello lines | `csync log --relay` |
 | Receipt | `~/Desktop/csync-receipt-<date>.txt` on the target | teardown, unless `--no-receipt` | the change ledger, every command run, files moved in and out, and the verification that everything else was removed | the friend, after the session |
 
@@ -282,6 +282,15 @@ a recorded login shell when the command is empty. Because the gate sits in the
 key line, it holds even when someone bypasses `csync` and uses raw `ssh`. The
 one command it does not write down is the bare `true` the console sends as a
 liveness probe before each verb.
+
+A verb that streams a script arrives as `bash -s`, which tells the person
+reading the log nothing, so the console prefixes `CSYNC_OP=<name>` and the gate
+turns that key into a phrase of its own: `shot` reads as "took a screenshot".
+The console supplies the key and never the words, the raw command stays on the
+line beside the phrase, and a key that is not a bare lowercase name is dropped.
+So a console that lied about which verb it was running would still have its
+actual command written down, which is the property that makes the log worth
+reading.
 
 ### What is refused before it runs
 
@@ -479,6 +488,67 @@ holding the phone. The phone side is three lines pasted into Termux once, and
 `adb-dev.sh phone-lines` prints them. The proper long-running ADB mode, the one
 that would give a real screen capture and the full system log, is separate and
 later.
+
+## csync mesh: your own devices
+
+Everything above is about driving a laptop you do not own and leaving no trace.
+The mesh is the opposite case: your own always-on devices, which trust each
+other and stay set up. Where a target never listens, a mesh peer always does.
+Where the console reaches through a tunnel the target opened, any peer sends
+straight to any other. It shares the tailnet, the token idea, and the
+`~/csync/inbox` convention, and it is a separate component, not a mode of the
+borrow-a-laptop flow.
+
+```
+                 Tailscale tailnet  (identity · encrypted P2P · the boundary)
+  ┌───────────┬───────────────┬────────────────┬───────────────┬────────────────┐
+  │   Mac      │  Raspberry Pi  │  Android (hub) │ iPhone (later) │ remote server   │
+  │ csync-agent│  csync-agent   │  app + service  │  share-ext     │  csync-agent    │
+  │  listen ▲  │  listen ▲      │  listen ▲       │  (send only)   │  listen ▲       │
+  │  send  ─┼─►│  send  ─┼─────►│  send  ─┼──────►│  send  ─┼─────►│  send  ─┼─────► │
+  └─────────┼──┴─────────┼──────┴─────────┼───────┴────────┴──────┴─────────┼───────┘
+        every device speaks ONE contract:   /whoami  ·  /send  ·  /peers
+              peer scan  =  `tailscale status`  ∩  /whoami probe
+```
+
+The agent is `agent/`, a single Go binary with no dependencies, so one build
+drops onto a Mac, a Pi, a Linux box, or a remote server and runs. It listens on
+this device's tailnet IP, never on the LAN or the internet, and every request
+carries a shared token, so there are two gates: the tailnet, then the token.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /whoami` | this device's name, platform, version, and what it accepts; also the liveness probe |
+| `POST /send` | receive text, a file, or an image into `~/csync/inbox/<from>/`; text also lands on the clipboard, and every arrival raises a notification |
+| `GET /peers` | this agent's tailnet view, so a device without the `tailscale` CLI (a phone) can still discover its neighbours |
+
+Identity and reachability come from Tailscale, so nothing is reinvented: a peer
+scan is the tailnet's own device list intersected with which of them answer
+`/whoami`. Discovery is not a hardcoded address list.
+
+The wire is plain HTTP, not HTTPS, on purpose. The tailnet is already encrypted
+end to end by WireGuard, so a second TLS layer would add self-signed-certificate
+pain on Android for no real gain. The token, not the transport, is what proves
+a sender is one of your devices.
+
+| Command | What it does |
+|---|---|
+| `csync-agent serve` | start the receiver (binds to this device's tailnet IP) |
+| `csync-agent peers` | list tailnet peers and which run an agent |
+| `csync-agent send <peer> --text "..."` | send text; lands on the peer's clipboard on macOS |
+| `csync-agent send <peer> <file>...` | send files or images |
+| `csync-agent token` | print the shared token, minting one on first run |
+
+Install it with `agent/install-macos.sh` (a LaunchAgent that keeps it running)
+or `agent/install-linux.sh <binary>` (a per-user systemd service). The same
+token file, `~/.config/csync/mesh.token`, must be copied to every device you
+trust.
+
+The phone side is the `csync-hub` Android app, which folds the earlier test apps
+into one: an xkcd page and its home-screen widget, a Shizuku system monitor, and
+a Devices page that scans peers, sends, and runs the receiver. The app also
+registers in the system share sheet, so "Share → csync" pushes text, an image,
+or a file straight to a chosen device over the tailnet.
 
 ## Not in v1
 

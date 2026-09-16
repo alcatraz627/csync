@@ -5,3 +5,5 @@ __pycache__/
 .claude/skills/shared/locks/
 _*.claude.md
 .DS_Store
+.playwright-mcp/
+agent/dist/
