@@ -7,3 +7,4 @@ _*.claude.md
 .DS_Store
 .playwright-mcp/
 agent/dist/
+assist/dist/
