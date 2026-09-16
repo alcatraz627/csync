@@ -146,11 +146,22 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Make a shared item instantly usable, not just filed: text lands on the
-	// clipboard, and every arrival raises a desktop notification.
-	if kind == "text" && runtime.GOOS == "darwin" {
-		copyToClipboard(dest)
+	// clipboard, and every arrival raises a desktop notification. For text the
+	// notification shows the content itself, not the filename, so it is readable
+	// at a glance; for a file it shows the name.
+	body := name
+	if kind == "text" {
+		if b, err := os.ReadFile(dest); err == nil {
+			body = strings.TrimSpace(string(b))
+			if len(body) > 200 {
+				body = body[:200] + "…"
+			}
+		}
+		if runtime.GOOS == "darwin" {
+			copyToClipboard(dest)
+		}
 	}
-	notify(fmt.Sprintf("csync: %s from %s", kind, from), name)
+	notify(fmt.Sprintf("csync: %s from %s", kind, from), body)
 
 	log.Printf("received %s %q from %s (%d bytes) -> %s", kind, name, from, n, dest)
 	writeJSON(w, map[string]any{"ok": true, "saved": dest, "bytes": n})

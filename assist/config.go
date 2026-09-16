@@ -21,7 +21,9 @@ func configDir() string {
 	return filepath.Join(home, ".config", "csync")
 }
 
-// geminiKey is the API key, kept on this device only (never on the phone).
+// geminiKey is the API key, kept on this device only (never on the phone). The
+// file may hold the raw key or a KEY=value line (e.g. GEMINI_API_KEY=...); both
+// are accepted, and surrounding quotes are stripped.
 func geminiKey() (string, error) {
 	p := filepath.Join(configDir(), "gemini.key")
 	b, err := os.ReadFile(p)
@@ -29,6 +31,10 @@ func geminiKey() (string, error) {
 		return "", fmt.Errorf("no Gemini key at %s: write your key there, then restart", p)
 	}
 	k := strings.TrimSpace(string(b))
+	if i := strings.Index(k, "="); i >= 0 && !strings.Contains(k[:i], " ") {
+		k = strings.TrimSpace(k[i+1:]) // drop a leading GEMINI_API_KEY= style prefix
+	}
+	k = strings.Trim(k, "\"'")
 	if k == "" {
 		return "", fmt.Errorf("Gemini key at %s is empty", p)
 	}
