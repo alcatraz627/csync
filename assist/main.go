@@ -70,10 +70,6 @@ func main() {
 }
 
 func serve() error {
-	key, err := geminiKey()
-	if err != nil {
-		return err
-	}
 	token, err := meshToken()
 	if err != nil {
 		return err
@@ -82,14 +78,36 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	m := model()
 	sessions := newStore()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/whoami", func(w http.ResponseWriter, r *http.Request) {
+		cfg := loadAssistConfig()
 		writeJSON(w, map[string]any{
-			"name": selfName(), "platform": platform(), "role": "assist", "model": m,
+			"name": selfName(), "platform": platform(), "role": "assist",
+			"provider": cfg.Provider, "model": cfg.Model, "effort": cfg.Effort,
 		})
+	})
+	mux.HandleFunc("/providers", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		writeJSON(w, map[string]any{"providers": loadProviders(), "active": loadAssistConfig()})
+	})
+	mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		var c assistConfig
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			http.Error(w, "need JSON {provider, model, effort}", http.StatusBadRequest)
+			return
+		}
+		if err := saveAssistConfig(c); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "active": loadAssistConfig()})
 	})
 	mux.HandleFunc("/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
@@ -122,8 +140,18 @@ func serve() error {
 		if req.Session == "" {
 			req.Session = "default"
 		}
+		cfg := loadAssistConfig()
+		if cfg.Provider != "gemini" {
+			http.Error(w, cfg.Provider+" provider is selected but not yet wired; choose Gemini in Settings", http.StatusNotImplemented)
+			return
+		}
+		key, err := providerKey(cfg.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
 		history := sessions.append(req.Session, gContent{Role: "user", Parts: []gPart{{Text: req.Message}}})
-		turns, err := runChat(key, m, systemPrompt(), history)
+		turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history)
 		if err != nil {
 			log.Printf("chat error (session %s): %v", req.Session, err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -150,7 +178,7 @@ func serve() error {
 
 	addr := fmt.Sprintf("%s:%d", ip, AssistPort)
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("csync-assist on %s (model %s) listening on http://%s", selfName(), m, addr)
+	log.Printf("csync-assist on %s (%s/%s) listening on http://%s", selfName(), loadAssistConfig().Provider, loadAssistConfig().Model, addr)
 	return srv.ListenAndServe()
 }
 
@@ -168,17 +196,17 @@ type turn struct {
 // tool calls along the way so the app can show how the answer was reached. Each
 // functionCall is executed and its result replayed, up to a cap so a misbehaving
 // loop cannot run forever.
-func runChat(key, model, system string, history []gContent) ([]turn, error) {
+func runChat(key, model, effort, system string, history []gContent) ([]turn, error) {
 	working := make([]gContent, len(history))
 	copy(working, history)
 	sys := &gContent{Parts: []gPart{{Text: system}}}
 	tools := toolDeclarations()
-	thinkOn := &gGenerationConfig{ThinkingConfig: &gThinkingConfig{IncludeThoughts: true}}
+	think := effortToThinking(effort)
 	var turns []turn
 
 	for step := 0; step < 8; step++ {
 		content, err := generate(key, model, gRequest{
-			SystemInstruction: sys, Contents: working, Tools: tools, GenerationConfig: thinkOn,
+			SystemInstruction: sys, Contents: working, Tools: tools, GenerationConfig: think,
 		})
 		if err != nil {
 			return nil, err
@@ -234,11 +262,12 @@ func cmdAsk(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: csync-assist ask \"<message>\"")
 	}
-	key, err := geminiKey()
+	cfg := loadAssistConfig()
+	key, err := providerKey(cfg.Provider)
 	if err != nil {
 		return err
 	}
-	turns, err := runChat(key, model(), systemPrompt(),
+	turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(),
 		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}})
 	if err != nil {
 		return err

@@ -24,19 +24,23 @@ func configDir() string {
 // geminiKey is the API key, kept on this device only (never on the phone). The
 // file may hold the raw key or a KEY=value line (e.g. GEMINI_API_KEY=...); both
 // are accepted, and surrounding quotes are stripped.
-func geminiKey() (string, error) {
-	p := filepath.Join(configDir(), "gemini.key")
+func geminiKey() (string, error) { return readKeyFile(filepath.Join(configDir(), "gemini.key")) }
+
+// readKeyFile reads an API key, accepting a raw key or a KEY=value line and
+// stripping surrounding quotes, so a GEMINI_API_KEY=... or ANTHROPIC_API_KEY=...
+// file works as-is.
+func readKeyFile(p string) (string, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return "", fmt.Errorf("no Gemini key at %s: write your key there, then restart", p)
+		return "", fmt.Errorf("no key at %s: write the key there, then restart", p)
 	}
 	k := strings.TrimSpace(string(b))
 	if i := strings.Index(k, "="); i >= 0 && !strings.Contains(k[:i], " ") {
-		k = strings.TrimSpace(k[i+1:]) // drop a leading GEMINI_API_KEY= style prefix
+		k = strings.TrimSpace(k[i+1:])
 	}
 	k = strings.Trim(k, "\"'")
 	if k == "" {
-		return "", fmt.Errorf("Gemini key at %s is empty", p)
+		return "", fmt.Errorf("key at %s is empty", p)
 	}
 	return k, nil
 }
