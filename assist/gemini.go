@@ -22,6 +22,9 @@ type gPart struct {
 	// Gemini 3.x returns an opaque thought signature on functionCall parts that
 	// must be echoed back verbatim when the tool-call turn is replayed.
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
+	// A part marked Thought is the model's reasoning, surfaced separately from
+	// its answer when thinking output is requested.
+	Thought bool `json:"thought,omitempty"`
 }
 
 type gFunctionCall struct {
@@ -56,10 +59,19 @@ type gTool struct {
 	FunctionDeclarations []gFuncDecl `json:"function_declarations"`
 }
 
+type gThinkingConfig struct {
+	IncludeThoughts bool `json:"includeThoughts"`
+}
+
+type gGenerationConfig struct {
+	ThinkingConfig *gThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
 type gRequest struct {
-	SystemInstruction *gContent  `json:"system_instruction,omitempty"`
-	Contents          []gContent `json:"contents"`
-	Tools             []gTool    `json:"tools,omitempty"`
+	SystemInstruction *gContent          `json:"system_instruction,omitempty"`
+	Contents          []gContent         `json:"contents"`
+	Tools             []gTool            `json:"tools,omitempty"`
+	GenerationConfig  *gGenerationConfig `json:"generationConfig,omitempty"`
 }
 
 type gResponse struct {
@@ -129,6 +141,27 @@ func firstText(c gContent) string {
 		}
 	}
 	return ""
+}
+
+// firstAnswerText returns the model's answer, skipping thought parts.
+func firstAnswerText(c gContent) string {
+	for _, p := range c.Parts {
+		if p.Text != "" && !p.Thought {
+			return p.Text
+		}
+	}
+	return ""
+}
+
+// thoughts returns the model's reasoning parts as plain strings.
+func thoughts(c gContent) []string {
+	var out []string
+	for _, p := range c.Parts {
+		if p.Text != "" && p.Thought {
+			out = append(out, p.Text)
+		}
+	}
+	return out
 }
 
 func functionCalls(c gContent) []gFunctionCall {

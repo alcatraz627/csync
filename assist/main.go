@@ -91,6 +91,18 @@ func serve() error {
 			"name": selfName(), "platform": platform(), "role": "assist", "model": m,
 		})
 	})
+	mux.HandleFunc("/capabilities", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		var caps []map[string]string
+		for _, t := range toolDeclarations() {
+			for _, d := range t.FunctionDeclarations {
+				caps = append(caps, map[string]string{"name": d.Name, "description": d.Description})
+			}
+		}
+		writeJSON(w, map[string]any{"tools": caps})
+	})
 	mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -111,14 +123,15 @@ func serve() error {
 			req.Session = "default"
 		}
 		history := sessions.append(req.Session, gContent{Role: "user", Parts: []gPart{{Text: req.Message}}})
-		reply, err := runChat(key, m, systemPrompt(), history)
+		turns, err := runChat(key, m, systemPrompt(), history)
 		if err != nil {
 			log.Printf("chat error (session %s): %v", req.Session, err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		reply := finalText(turns)
 		sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
-		writeJSON(w, map[string]any{"reply": reply})
+		writeJSON(w, map[string]any{"turns": turns, "reply": reply})
 	})
 	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
@@ -141,37 +154,65 @@ func serve() error {
 	return srv.ListenAndServe()
 }
 
-// runChat drives one user turn to a text answer, letting the model call tools in
-// between. Each functionCall is executed and its result replayed, up to a cap so
-// a misbehaving loop cannot run forever.
-func runChat(key, model, system string, history []gContent) (string, error) {
+// turn is one visible step of an answer: the model's thinking, a tool it called
+// with the result, or the final markdown text. The app renders these in order.
+type turn struct {
+	Type   string         `json:"type"` // thinking | tool_call | text
+	Text   string         `json:"text,omitempty"`
+	Name   string         `json:"name,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
+	Result map[string]any `json:"result,omitempty"`
+}
+
+// runChat drives one user turn to a final answer, collecting the thinking and
+// tool calls along the way so the app can show how the answer was reached. Each
+// functionCall is executed and its result replayed, up to a cap so a misbehaving
+// loop cannot run forever.
+func runChat(key, model, system string, history []gContent) ([]turn, error) {
 	working := make([]gContent, len(history))
 	copy(working, history)
 	sys := &gContent{Parts: []gPart{{Text: system}}}
 	tools := toolDeclarations()
+	thinkOn := &gGenerationConfig{ThinkingConfig: &gThinkingConfig{IncludeThoughts: true}}
+	var turns []turn
 
 	for step := 0; step < 8; step++ {
 		content, err := generate(key, model, gRequest{
-			SystemInstruction: sys, Contents: working, Tools: tools,
+			SystemInstruction: sys, Contents: working, Tools: tools, GenerationConfig: thinkOn,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
+		}
+		for _, t := range thoughts(content) {
+			turns = append(turns, turn{Type: "thinking", Text: t})
 		}
 		calls := functionCalls(content)
 		if len(calls) == 0 {
-			return firstText(content), nil
+			turns = append(turns, turn{Type: "text", Text: firstAnswerText(content)})
+			return turns, nil
 		}
 		working = append(working, content) // the model's tool-call turn
 		var responses []gPart
 		for _, fc := range calls {
 			result := executeTool(fc.Name, fc.Args)
+			turns = append(turns, turn{Type: "tool_call", Name: fc.Name, Args: fc.Args, Result: result})
 			responses = append(responses, gPart{
 				FunctionResponse: &gFunctionResponse{Name: fc.Name, Response: result},
 			})
 		}
 		working = append(working, gContent{Role: functionResponseRole, Parts: responses})
 	}
-	return "", fmt.Errorf("gave up after 8 tool steps without a final answer")
+	return nil, fmt.Errorf("gave up after 8 tool steps without a final answer")
+}
+
+// finalText returns the last text turn, the answer the app treats as the reply.
+func finalText(turns []turn) string {
+	for i := len(turns) - 1; i >= 0; i-- {
+		if turns[i].Type == "text" {
+			return turns[i].Text
+		}
+	}
+	return ""
 }
 
 func authed(w http.ResponseWriter, r *http.Request, token string) bool {
@@ -197,12 +238,21 @@ func cmdAsk(args []string) error {
 	if err != nil {
 		return err
 	}
-	reply, err := runChat(key, model(), systemPrompt(),
+	turns, err := runChat(key, model(), systemPrompt(),
 		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}})
 	if err != nil {
 		return err
 	}
-	fmt.Println(reply)
+	for _, t := range turns {
+		switch t.Type {
+		case "thinking":
+			fmt.Println("[thinking] " + t.Text)
+		case "tool_call":
+			fmt.Printf("[tool] %s -> %v\n", t.Name, t.Result)
+		case "text":
+			fmt.Println(t.Text)
+		}
+	}
 	return nil
 }
 
