@@ -151,14 +151,49 @@ func serve() error {
 			return
 		}
 		history := sessions.append(req.Session, gContent{Role: "user", Parts: []gPart{{Text: req.Message}}})
-		turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history)
-		if err != nil {
-			log.Printf("chat error (session %s): %v", req.Session, err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
+
+		// Streaming mode (?stream=1): send each turn as newline-delimited JSON,
+		// flushed the moment it happens, so the app shows tool calls and results
+		// live. A final {"done":true,"reply":...} line closes the stream.
+		if r.URL.Query().Get("stream") == "1" {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.Header().Set("X-Accel-Buffering", "no")
+			flusher, _ := w.(http.Flusher)
+			enc := json.NewEncoder(w)
+			emit := func(t turn) {
+				_ = enc.Encode(map[string]any{"turn": t})
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history, emit)
+			reply := finalText(turns)
+			if reply != "" {
+				sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
+			}
+			if err != nil {
+				log.Printf("chat error (session %s): %v", req.Session, err)
+				_ = enc.Encode(map[string]any{"error": err.Error()})
+			}
+			_ = enc.Encode(map[string]any{"done": true, "reply": reply})
+			if flusher != nil {
+				flusher.Flush()
+			}
 			return
 		}
+
+		turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history, nil)
 		reply := finalText(turns)
-		sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
+		if reply != "" {
+			sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
+		}
+		if err != nil {
+			log.Printf("chat error (session %s): %v", req.Session, err)
+			if reply == "" {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+		}
 		writeJSON(w, map[string]any{"turns": turns, "reply": reply})
 	})
 	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
@@ -192,45 +227,57 @@ type turn struct {
 	Result map[string]any `json:"result,omitempty"`
 }
 
+// maxToolSteps is a runaway guard, not a task budget. A real multi-step task
+// stays well under it; it only exists so a model that never produces a final
+// answer cannot call tools forever and drain the API key.
+const maxToolSteps = 100
+
 // runChat drives one user turn to a final answer, collecting the thinking and
 // tool calls along the way so the app can show how the answer was reached. Each
-// functionCall is executed and its result replayed, up to a cap so a misbehaving
-// loop cannot run forever.
-func runChat(key, model, effort, system string, history []gContent) ([]turn, error) {
+// functionCall is executed and its result replayed. When emit is set it is called
+// with every turn the moment it happens, so the caller can stream progress to the
+// app live rather than waiting for the whole answer.
+func runChat(key, model, effort, system string, history []gContent, emit func(turn)) ([]turn, error) {
 	working := make([]gContent, len(history))
 	copy(working, history)
 	sys := &gContent{Parts: []gPart{{Text: system}}}
 	tools := toolDeclarations()
 	think := effortToThinking(effort)
 	var turns []turn
+	add := func(t turn) {
+		turns = append(turns, t)
+		if emit != nil {
+			emit(t)
+		}
+	}
 
-	for step := 0; step < 8; step++ {
+	for step := 0; step < maxToolSteps; step++ {
 		content, err := generate(key, model, gRequest{
 			SystemInstruction: sys, Contents: working, Tools: tools, GenerationConfig: think,
 		})
 		if err != nil {
-			return nil, err
+			return turns, err
 		}
 		for _, t := range thoughts(content) {
-			turns = append(turns, turn{Type: "thinking", Text: t})
+			add(turn{Type: "thinking", Text: t})
 		}
 		calls := functionCalls(content)
 		if len(calls) == 0 {
-			turns = append(turns, turn{Type: "text", Text: firstAnswerText(content)})
+			add(turn{Type: "text", Text: firstAnswerText(content)})
 			return turns, nil
 		}
 		working = append(working, content) // the model's tool-call turn
 		var responses []gPart
 		for _, fc := range calls {
 			result := executeTool(fc.Name, fc.Args)
-			turns = append(turns, turn{Type: "tool_call", Name: fc.Name, Args: fc.Args, Result: result})
+			add(turn{Type: "tool_call", Name: fc.Name, Args: fc.Args, Result: result})
 			responses = append(responses, gPart{
 				FunctionResponse: &gFunctionResponse{Name: fc.Name, Response: result},
 			})
 		}
 		working = append(working, gContent{Role: functionResponseRole, Parts: responses})
 	}
-	return nil, fmt.Errorf("gave up after 8 tool steps without a final answer")
+	return turns, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
 }
 
 // finalText returns the last text turn, the answer the app treats as the reply.
@@ -268,7 +315,7 @@ func cmdAsk(args []string) error {
 		return err
 	}
 	turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(),
-		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}})
+		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}}, nil)
 	if err != nil {
 		return err
 	}
