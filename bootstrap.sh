@@ -127,7 +127,13 @@ say "  fetched gate, teardown, and root teardown; hashes match the invite"
 printf '%s' "$INVITE_KEY_B64" > "$TMP/ik.b64"
 b64d "$TMP/ik.b64" "$CS/invite_key" || die "invite key does not decode"
 chmod 600 "$CS/invite_key"
-ssh-keygen -y -f "$CS/invite_key" >/dev/null 2>&1 || die "invite key did not install cleanly (base64 decode produced a bad key); re-mint and paste again"
+# The private half must SIGN, not merely parse. If the decode mangled it, retry
+# with openssl (deterministic on LibreSSL and OpenSSL) before giving up.
+if ! ssh-keygen -y -f "$CS/invite_key" >/dev/null 2>&1; then
+  openssl base64 -d -A < "$TMP/ik.b64" > "$CS/invite_key" 2>/dev/null
+  chmod 600 "$CS/invite_key"
+  ssh-keygen -y -f "$CS/invite_key" >/dev/null 2>&1 || die "invite key did not install cleanly (base64 decode produced a bad key); this is a csync bug, do not retry the paste, tell the operator"
+fi
 printf 'csync-relay %s\n' "$RELAY_HOSTKEY" > "$CS/known_hosts"
 chmod 600 "$CS/known_hosts"
 
