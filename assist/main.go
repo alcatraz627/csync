@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -209,6 +210,19 @@ func serve() error {
 		}
 		sessions.reset(req.Session)
 		writeJSON(w, map[string]any{"ok": true})
+	})
+	// /media serves a captured or shared file by name so the app can show it inline.
+	// filepath.Base strips any path, so a name cannot escape the media dir.
+	mux.HandleFunc("/media/", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		name := filepath.Base(r.URL.Path)
+		if name == "." || name == "/" || name == "media" {
+			http.Error(w, "no file named", http.StatusBadRequest)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(mediaDir(), name))
 	})
 
 	addr := fmt.Sprintf("%s:%d", ip, AssistPort)

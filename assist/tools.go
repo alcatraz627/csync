@@ -54,6 +54,44 @@ func toolDeclarations() []gTool {
 				Required: []string{"command"},
 			},
 		},
+		{
+			Name:        "camera",
+			Description: "Use this home server's camera. action=status detects the camera and reports whether one is attached; action=capture takes a photo; action=record films a short clip (duration_seconds, default 5). Photos and clips are saved and returned with a media_url the app shows inline.",
+			Parameters: gSchema{
+				Type: "object",
+				Properties: map[string]gSchema{
+					"action":           {Type: "string", Description: "status, capture, or record"},
+					"duration_seconds": {Type: "integer", Description: "clip length for record, 1 to 120"},
+				},
+				Required: []string{"action"},
+			},
+		},
+		{
+			Name:        "send_image",
+			Description: "Share an image or video file that already exists on this home server into the chat, returned as a media_url the app shows inline.",
+			Parameters: gSchema{
+				Type: "object",
+				Properties: map[string]gSchema{
+					"path": {Type: "string", Description: "absolute path to the image or video file"},
+				},
+				Required: []string{"path"},
+			},
+		},
+		{
+			Name:        "top_processes",
+			Description: "List the heaviest processes on this home server. by=cpu (default) or by=mem.",
+			Parameters: gSchema{
+				Type: "object",
+				Properties: map[string]gSchema{
+					"by": {Type: "string", Description: "cpu or mem"},
+				},
+			},
+		},
+		{
+			Name:        "pi_vitals",
+			Description: "Report this Raspberry Pi's temperature, throttling state, CPU clock, and core voltage. No arguments.",
+			Parameters:  gSchema{Type: "object", Properties: map[string]gSchema{}},
+		},
 	}}}
 }
 
@@ -70,6 +108,14 @@ func executeTool(name string, args map[string]any) map[string]any {
 		return sendToPeer(str(args["peer"]), str(args["text"]))
 	case "run_command":
 		return runCommand(str(args["command"]))
+	case "camera":
+		return cameraTool(str(args["action"]), argStr(args, "duration_seconds"))
+	case "send_image":
+		return sendImage(str(args["path"]))
+	case "top_processes":
+		return topProcesses(str(args["by"]))
+	case "pi_vitals":
+		return piVitals()
 	default:
 		return map[string]any{"error": "unknown tool " + name}
 	}
