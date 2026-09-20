@@ -49,7 +49,7 @@ def build_parser():
     s = sp.add_parser("invite", help="mint the one line to paste on the other laptop")
     s.add_argument("name")
     s.add_argument("--route", default="auto", choices=["auto", "lan", "funnel"])
-    s.add_argument("--ttl")
+    s.add_argument("--ttl", help="how long the session lives, like 4h or 30d; none for a trusted machine that never expires")
     s.add_argument("--expires")
     s.add_argument("--src")
     s.add_argument("--relay-host", help="address the target dials for the reverse tunnel on the lan route; use the console's tailnet IP to reach the relay directly over the tailnet, skipping Funnel")

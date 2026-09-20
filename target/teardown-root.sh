@@ -23,8 +23,10 @@ fi
 . "$RD/state.env"
 
 now=$(date +%s)
-if [ ! -e "$cs/teardown.requested" ] && [ "$now" -lt "$deadline" ]; then
-  exit 0
+if [ ! -e "$cs/teardown.requested" ]; then
+  # deadline 0 or empty is the no-expiry case: only a user teardown request ends the session
+  case "$deadline" in ''|0) exit 0 ;; esac
+  [ "$now" -lt "$deadline" ] && exit 0
 fi
 
 if [ "$dropin_existed" = "0" ]; then

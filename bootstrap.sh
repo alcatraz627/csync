@@ -98,7 +98,9 @@ mkdir -p "$CS"
 chmod 700 "$CS"
 ME="$(id -un)"
 CREATED_H="$(date '+%Y-%m-%d %H:%M:%S')"
-DEADLINE=$(( NOW + TTL ))
+# TTL 0 is the no-expiry case (a trusted own machine): no deadline, no TTL teardown timer.
+case "$TTL" in ''|*[!0-9]*) TTL=0 ;; esac
+if [ "$TTL" -gt 0 ]; then DEADLINE=$(( NOW + TTL )); else DEADLINE=0; fi
 
 st() { printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")" >> "$CS/state.env"; }
 changed() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" >> "$CS/changes.log"; }
@@ -108,7 +110,8 @@ st user_name "$ME"; st uid "$(id -u)"; st route "$ROUTE"; st port "$PORT"; st ta
 st console_name "$CONSOLE_NAME"; st created "$NOW"; st created_h "$CREATED_H"; st deadline "$DEADLINE"
 st no_root "$NO_ROOT"; st bash_bin "$BASH_BIN"; st etc_ssh "$ETC_SSH"
 
-step "csync $NAME: setting this machine up for $CONSOLE_NAME (until $(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M'))"
+if [ "$DEADLINE" -gt 0 ]; then UNTIL="until $(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M')"; else UNTIL="with no expiry"; fi
+step "csync $NAME: setting this machine up for $CONSOLE_NAME ($UNTIL)"
 
 sha256() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'; else sha256sum "$1" | awk '{print $1}'; fi
@@ -224,7 +227,7 @@ hostkey() {
 }
 while :; do
   now=\$(date +%s)
-  if [ "\$now" -ge "$DEADLINE" ]; then exec "$BASH_BIN" "\$CS/teardown.sh" --ttl; fi
+  if [ "$DEADLINE" -gt 0 ] && [ "\$now" -ge "$DEADLINE" ]; then exec "$BASH_BIN" "\$CS/teardown.sh" --ttl; fi
   HELLO="$HELLO_HEAD sshd_hostkey=\$(hostkey) $HELLO_TAIL"
   ssh -F none -T -i "\$CS/invite_key" -o IdentitiesOnly=yes -o UserKnownHostsFile="\$CS/known_hosts" \\
       -o StrictHostKeyChecking=yes -o HostKeyAlias=csync-relay -o ExitOnForwardFailure=yes \\
@@ -322,7 +325,7 @@ PL
   chown root:wheel /Library/LaunchDaemons/sh.csync.ttl.plist; chmod 644 /Library/LaunchDaemons/sh.csync.ttl.plist
   launchctl bootout system/sh.csync.ttl >/dev/null 2>&1
   launchctl bootstrap system /Library/LaunchDaemons/sh.csync.ttl.plist
-  echo "CHANGED: timed cleanup armed for \$(date -r "\$DEADLINE" '+%H:%M')"
+  if [ "\$DEADLINE" -gt 0 ]; then echo "CHANGED: timed cleanup armed for \$(date -r "\$DEADLINE" '+%H:%M')"; else echo "CHANGED: cleanup armed, no expiry (waits for csync teardown)"; fi
 else
   if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
     if command -v apt-get >/dev/null 2>&1; then apt-get install -y -q openssh-server; elif command -v dnf >/dev/null 2>&1; then dnf install -y -q openssh-server; elif command -v pacman >/dev/null 2>&1; then pacman -S --noconfirm --quiet openssh; fi
@@ -362,17 +365,22 @@ else
   changed "root steps skipped (--no-root): the SSH service and the timed cleanup were not touched"
 fi
 
-ENDS_AT="$(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M')"
+if [ "$DEADLINE" -gt 0 ]; then
+  ENDS_AT="$(date -r "$DEADLINE" '+%H:%M' 2>/dev/null || date -d "@$DEADLINE" '+%H:%M')"
+  WINDOW="until $ENDS_AT"
+else
+  WINDOW="until you end it with teardown"
+fi
 if [ "$OS" = "darwin" ]; then
-  osascript -e "display notification \"$CONSOLE_NAME can now reach this Mac until $ENDS_AT. Details in Terminal.\" with title \"csync\"" >/dev/null 2>&1
+  osascript -e "display notification \"$CONSOLE_NAME can now reach this Mac $WINDOW. Details in Terminal.\" with title \"csync\"" >/dev/null 2>&1
 elif [ "$OS" = android ]; then
-  termux-notification --title csync --content "$CONSOLE_NAME can reach this phone until $ENDS_AT" >/dev/null 2>&1
+  termux-notification --title csync --content "$CONSOLE_NAME can reach this phone $WINDOW" >/dev/null 2>&1
 elif command -v notify-send >/dev/null 2>&1; then
   notify-send "csync" "$CONSOLE_NAME can now reach this machine. Details in the terminal." >/dev/null 2>&1
 fi
 
 say ""
-say "  Connected to $CONSOLE_NAME as $ME, until $ENDS_AT"
+say "  Connected to $CONSOLE_NAME as $ME, $WINDOW"
 if [ "$OS" = android ]; then
   say "  They can: run commands in Termux, copy files both ways, read device info, take a CAMERA photo."
   say "  They cannot: see your screen, use root, read other apps' data, or see your passwords."

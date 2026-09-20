@@ -20,9 +20,14 @@ TOKEN_ORDER = [
 
 
 def parse_duration(text):
-    m = re.fullmatch(r"(\d+)([smhd]?)", str(text).strip())
+    # 0 is the "no expiry" sentinel (a trusted own machine that should not need
+    # re-pairing each session); none/never/off are spellings of it.
+    t = str(text).strip().lower()
+    if t in ("none", "never", "off", "0"):
+        return 0
+    m = re.fullmatch(r"(\d+)([smhd]?)", t)
     if not m:
-        raise CsyncError(USAGE, f"bad duration {text!r}", fix="use 30m, 4h, 1d")
+        raise CsyncError(USAGE, f"bad duration {text!r}", fix="use 30m, 4h, 1d, or none")
     n, unit = int(m.group(1)), m.group(2) or "s"
     return n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
 
