@@ -131,7 +131,8 @@ def build_parser():
     s.add_argument("--no-receipt", action="store_true")
 
     s = sp.add_parser("forget", help="drop a host record whose tunnel is already gone")
-    s.add_argument("name")
+    s.add_argument("name", nargs="?")
+    s.add_argument("--stale", action="store_true", help="drop every expired invite and gone host at once")
 
     s = sp.add_parser("revoke", help="close invites")
     s.add_argument("--all", action="store_true")
@@ -439,20 +440,39 @@ def main(argv=None):
                         out_human(emit.green("clean") + emit.dim(f"   kept {result['kept']}"))
                 emit.notify("csync", f"{name} torn down" + ("" if code == 0 else f", {len(result['residue'])} left"), cfg.get("notify", True))
         elif args.verb == "forget":
+            now = time.time()
+
+            def is_stale(hh):
+                # A live host is never stale; otherwise a gone host, an invite past its
+                # expiry, or a session past its deadline has nothing left to reach.
+                if hh.get("status") == "online" and tunnel.hello_alive(hh):
+                    return False
+                if hh.get("status") == "gone":
+                    return True
+                if hh.get("status") == "invited" and hh.get("expires") and now > hh["expires"]:
+                    return True
+                return bool(hh.get("deadline") and now > hh["deadline"])
+
             with state.locked():
                 hosts = state.load_hosts()
-                hh = hosts.get(name)
-                if not hh:
-                    raise CsyncError(3, f"no host named {name!r}", fix="csync ls --all")
-                if hh.get("status") in ("online",) and tunnel.hello_alive(hh):
-                    raise CsyncError(USAGE, f"{name} is connected", fix=f"csync teardown {name}")
-                relay.remove_line(hh.get("id"))
-                del hosts[name]
+                if args.stale:
+                    targets = [n for n, hh in hosts.items() if is_stale(hh)]
+                else:
+                    if not name:
+                        raise CsyncError(USAGE, "say which host to forget", fix="csync forget <name>   ·   csync forget --stale")
+                    if name not in hosts:
+                        raise CsyncError(3, f"no host named {name!r}", fix="csync ls --all")
+                    if hosts[name].get("status") == "online" and tunnel.hello_alive(hosts[name]):
+                        raise CsyncError(USAGE, f"{name} is connected", fix=f"csync teardown {name}")
+                    targets = [name]
+                for n in targets:
+                    relay.remove_line(hosts[n].get("id"))
+                    del hosts[n]
                 tunnel.rewrite_ssh_config(hosts)
                 state.save_hosts(hosts)
-            result = {"forgot": name}
+            result = {"forgot": targets}
             if not args.json:
-                out_human(emit.dim(f"→ forgot {name}"))
+                out_human(emit.dim("→ forgot " + ", ".join(targets) if targets else "→ nothing stale to forget"))
         elif args.verb == "revoke":
             if not args.all:
                 raise CsyncError(USAGE, "say what to revoke", fix="csync revoke --all")
