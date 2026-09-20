@@ -106,9 +106,9 @@ func cameraTool(action, durationSec string) map[string]any {
 	}
 }
 
-// sendImage shares an existing image or video file into the chat by staging it in
-// mediaDir and returning a media_url the app renders inline.
-func sendImage(path string) map[string]any {
+// sendFile shares any existing file into the chat by staging it in mediaDir and
+// returning a media_url and a media_type the app renders or offers to open.
+func sendFile(path string) map[string]any {
 	if strings.TrimSpace(path) == "" {
 		return map[string]any{"error": "path is required"}
 	}
@@ -117,16 +117,7 @@ func sendImage(path string) map[string]any {
 		return map[string]any{"error": "no such file: " + path}
 	}
 	ext := strings.ToLower(filepath.Ext(path))
-	var mt string
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
-		mt = "image"
-	case ".mp4", ".mov", ".h264", ".webm":
-		mt = "video"
-	default:
-		return map[string]any{"error": "not an image or video file: " + ext}
-	}
-	name := "share-" + time.Now().Format("20060102-150405") + ext
+	name := time.Now().Format("150405") + "-" + filepath.Base(path)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return map[string]any{"error": "could not read file: " + err.Error()}
@@ -134,7 +125,75 @@ func sendImage(path string) map[string]any {
 	if err := os.WriteFile(filepath.Join(mediaDir(), name), b, 0o644); err != nil {
 		return map[string]any{"error": "could not stage file: " + err.Error()}
 	}
-	return map[string]any{"ok": true, "media_url": "/media/" + name, "media_type": mt}
+	return map[string]any{"ok": true, "media_url": "/media/" + name, "media_type": fileType(ext), "filename": filepath.Base(path)}
+}
+
+func fileType(ext string) string {
+	switch strings.TrimPrefix(strings.ToLower(ext), ".") {
+	case "jpg", "jpeg", "png", "gif", "webp", "bmp":
+		return "image"
+	case "mp4", "mov", "h264", "webm", "mkv":
+		return "video"
+	case "pdf":
+		return "pdf"
+	case "md", "markdown":
+		return "markdown"
+	case "txt", "log", "json", "yaml", "yml", "toml", "xml", "csv", "conf", "ini", "env",
+		"sh", "bash", "py", "js", "ts", "java", "kt", "go", "c", "h", "cpp", "rs", "html", "css":
+		return "text"
+	default:
+		return "file"
+	}
+}
+
+// skillsDir holds simple reusable prompts the model can list and load. The model
+// creates a skill by writing a .md file here (via run_command) and uses it by
+// loading its text back.
+func skillsDir() string {
+	d := filepath.Join(configDir(), "skills")
+	_ = os.MkdirAll(d, 0o755)
+	return d
+}
+
+func firstNonEmptyLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(strings.TrimLeft(l, "# "))
+		if l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
+func listSkills() map[string]any {
+	entries, err := os.ReadDir(skillsDir())
+	if err != nil {
+		return map[string]any{"skills": []any{}, "dir": skillsDir()}
+	}
+	skills := []map[string]any{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		desc := ""
+		if b, err := os.ReadFile(filepath.Join(skillsDir(), e.Name())); err == nil {
+			desc = firstNonEmptyLine(string(b))
+		}
+		skills = append(skills, map[string]any{"name": strings.TrimSuffix(e.Name(), ".md"), "summary": truncate(desc, 200)})
+	}
+	return map[string]any{"skills": skills, "dir": skillsDir()}
+}
+
+func loadSkill(name string) map[string]any {
+	name = strings.TrimSuffix(strings.TrimSpace(name), ".md")
+	if name == "" || strings.ContainsAny(name, "/\\") {
+		return map[string]any{"error": "give a plain skill name"}
+	}
+	b, err := os.ReadFile(filepath.Join(skillsDir(), name+".md"))
+	if err != nil {
+		return map[string]any{"error": "no skill named " + name + " (create one by writing " + filepath.Join(skillsDir(), name+".md") + ")"}
+	}
+	return map[string]any{"name": name, "content": string(b)}
 }
 
 // topProcesses lists the heaviest processes by cpu or memory.

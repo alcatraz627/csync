@@ -67,14 +67,30 @@ func toolDeclarations() []gTool {
 			},
 		},
 		{
-			Name:        "send_image",
-			Description: "Share an image or video file that already exists on this home server into the chat, returned as a media_url the app shows inline.",
+			Name:        "send_file",
+			Description: "Share any file on this home server into the chat (image, video, pdf, code, markdown, text, or other), returned as a media_url the app shows or opens.",
 			Parameters: gSchema{
 				Type: "object",
 				Properties: map[string]gSchema{
-					"path": {Type: "string", Description: "absolute path to the image or video file"},
+					"path": {Type: "string", Description: "absolute path to the file"},
 				},
 				Required: []string{"path"},
+			},
+		},
+		{
+			Name:        "list_skills",
+			Description: "List the saved skills (reusable prompts) on this home server. No arguments.",
+			Parameters:  gSchema{Type: "object", Properties: map[string]gSchema{}},
+		},
+		{
+			Name:        "load_skill",
+			Description: "Load a saved skill's text by name so you can follow it. Create a skill by writing a .md file into the skills dir with run_command.",
+			Parameters: gSchema{
+				Type: "object",
+				Properties: map[string]gSchema{
+					"name": {Type: "string", Description: "the skill name (filename without .md)"},
+				},
+				Required: []string{"name"},
 			},
 		},
 		{
@@ -110,8 +126,12 @@ func executeTool(name string, args map[string]any) map[string]any {
 		return runCommand(str(args["command"]))
 	case "camera":
 		return cameraTool(str(args["action"]), argStr(args, "duration_seconds"))
-	case "send_image":
-		return sendImage(str(args["path"]))
+	case "send_file", "send_image":
+		return sendFile(str(args["path"]))
+	case "list_skills":
+		return listSkills()
+	case "load_skill":
+		return loadSkill(str(args["name"]))
 	case "top_processes":
 		return topProcesses(str(args["by"]))
 	case "pi_vitals":

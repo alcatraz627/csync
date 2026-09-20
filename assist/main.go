@@ -133,6 +133,8 @@ func serve() error {
 		var req struct {
 			Session string `json:"session"`
 			Message string `json:"message"`
+			Model   string `json:"model"`
+			Effort  string `json:"effort"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
 			http.Error(w, "need JSON {session, message}", http.StatusBadRequest)
@@ -142,6 +144,13 @@ func serve() error {
 			req.Session = "default"
 		}
 		cfg := loadAssistConfig()
+		// A conversation can pin its own model and effort, overriding the saved default.
+		if req.Model != "" {
+			cfg.Model = req.Model
+		}
+		if req.Effort != "" {
+			cfg.Effort = req.Effort
+		}
 		if cfg.Provider != "gemini" {
 			http.Error(w, cfg.Provider+" provider is selected but not yet wired; choose Gemini in Settings", http.StatusNotImplemented)
 			return
