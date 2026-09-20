@@ -185,21 +185,19 @@ if [ "$OS" = android ]; then
   fi
 fi
 
-HK=""
-if [ -n "$DEV_HOSTKEY" ]; then
-  HK="$(awk '{print $1":"$2}' "$DEV_HOSTKEY.pub" 2>/dev/null)"
-else
-  for f in "$ETC_SSH/ssh_host_ed25519_key.pub" "$ETC_SSH/ssh_host_ecdsa_key.pub" "$ETC_SSH/ssh_host_rsa_key.pub"; do
-    [ -r "$f" ] && { HK="$(awk '{print $1":"$2}' "$f")"; break; }
-  done
-fi
-
 if [ "$OS" = android ]; then
   HOSTLABEL="$(getprop ro.product.model 2>/dev/null | tr ' ' '-')"
 fi
 [ -n "${HOSTLABEL:-}" ] || HOSTLABEL="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo device)"
 
-HELLO="hello v=1 id=$ID user=$ME host=$HOSTLABEL os=$OS osver=$(printf '%s' "$OSVER" | tr ' ' '_') arch=$ARCH route=$USE sshd_hostkey=$HK deadline=$DEADLINE cs=$CS"
+# The hello reports the sshd host key so the console can pin it without a
+# trust-on-first-use gap. We do NOT read the key here: on macOS the host key is
+# only generated when Remote Login turns on, which the root step below does after
+# this point, so a key read now can be empty and would then stay frozen for the
+# life of the tunnel. tunnel.sh reads it fresh on every connect instead, so the
+# pin self-heals on the first reconnect after the key exists.
+HELLO_HEAD="hello v=1 id=$ID user=$ME host=$HOSTLABEL os=$OS osver=$(printf '%s' "$OSVER" | tr ' ' '_') arch=$ARCH route=$USE"
+HELLO_TAIL="deadline=$DEADLINE cs=$CS"
 if [ "$USE" = "lan" ]; then
   DEST="$RELAY_USER@$LAN_HOST"; PORTOPT="-p $LAN_PORT"; PROXY=""
 else
@@ -209,16 +207,30 @@ fi
 
 cat > "$CS/tunnel.sh" <<EOF
 #!$BASH_BIN
-# keeps the reverse tunnel to $CONSOLE_NAME alive, and hands over to teardown at the deadline
+# keeps the reverse tunnel to $CONSOLE_NAME alive, and hands over to teardown at the deadline.
+# The sshd host key is read on every connect, not frozen at setup: on macOS the key exists only
+# after Remote Login is turned on, a step that runs after this file is written, so reading it
+# here lets the pin the console needs self-heal on the first reconnect once the key is present.
 CS="$CS"
+ETC_SSH="$ETC_SSH"
+DEV_HOSTKEY="$DEV_HOSTKEY"
+hostkey() {
+  if [ -n "\$DEV_HOSTKEY" ]; then
+    awk '{print \$1":"\$2}' "\$DEV_HOSTKEY.pub" 2>/dev/null; return
+  fi
+  for f in "\$ETC_SSH/ssh_host_ed25519_key.pub" "\$ETC_SSH/ssh_host_ecdsa_key.pub" "\$ETC_SSH/ssh_host_rsa_key.pub"; do
+    [ -r "\$f" ] && { awk '{print \$1":"\$2}' "\$f"; return; }
+  done
+}
 while :; do
   now=\$(date +%s)
   if [ "\$now" -ge "$DEADLINE" ]; then exec "$BASH_BIN" "\$CS/teardown.sh" --ttl; fi
+  HELLO="$HELLO_HEAD sshd_hostkey=\$(hostkey) $HELLO_TAIL"
   ssh -F none -T -i "\$CS/invite_key" -o IdentitiesOnly=yes -o UserKnownHostsFile="\$CS/known_hosts" \\
       -o StrictHostKeyChecking=yes -o HostKeyAlias=csync-relay -o ExitOnForwardFailure=yes \\
       -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o BatchMode=yes -o ConnectTimeout=15 \\
       $( [ -n "$PROXY" ] && printf '"%s"' "$PROXY" ) $PORTOPT \\
-      -R 127.0.0.1:$PORT:localhost:$TARGET_PORT "$DEST" "$HELLO" </dev/null
+      -R 127.0.0.1:$PORT:localhost:$TARGET_PORT "$DEST" "\$HELLO" </dev/null
   sleep 5
 done
 EOF

@@ -148,7 +148,15 @@ def pull(h, srcs, dst=None, json_mode=False):
 def shot(h, display=1, open_after=False, json_mode=False):
     rc, out, err = stream_script(h, "shot.sh", [str(display)])
     if rc != 0:
-        raise CsyncError(REMOTE_FAILED, f"screenshot failed on {h['name']}: {(err or out).strip()}", fix="csync info " + h["name"] + " displays")
+        blob = (err or "") + (out or "")
+        denied = rc == 3 or "screen-recording-denied" in blob or "could not create image" in blob
+        if denied:
+            raise CsyncError(
+                REMOTE_FAILED,
+                f"{h['name']} refused screen access: macOS needs Screen Recording granted to the SSH service",
+                fix=f"on {h['name']}: System Settings › Privacy & Security › Screen Recording › enable sshd-keygen-wrapper, then run csync shot {h['name']} again",
+            )
+        raise CsyncError(REMOTE_FAILED, f"screenshot failed on {h['name']}: {blob.strip()}", fix="csync info " + h["name"] + " displays")
     remote = out.strip().splitlines()[-1]
     local = _dir(h, "shots") / f"{_ts()}.png"
     _rsync(h, [f"csync-{h['name']}:{remote}", str(local)], capture=True)

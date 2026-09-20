@@ -12,7 +12,16 @@ mv -f "$f" "$f.png"
 f="$f.png"
 
 if [ "$os" = "Darwin" ]; then
-  screencapture -x -D "$display" "$f" 2>/dev/null || screencapture -x "$f"
+  err="$(screencapture -x -D "$display" "$f" 2>&1)"
+  [ -s "$f" ] || err="$(screencapture -x "$f" 2>&1)"
+  # macOS returns this exact phrase, non-zero, when Screen Recording is not granted
+  # to the SSH daemon; surface it as a distinct signal so the console names the real fix.
+  if [ ! -s "$f" ]; then
+    case "$err" in
+      *"could not create image"*|*[Nn]ot\ authorized*|*[Dd]enied*)
+        echo "screen-recording-denied" >&2; exit 3 ;;
+    esac
+  fi
 elif [ "$os" = "Android" ]; then
   if command -v termux-camera-photo >/dev/null 2>&1; then
     # display doubles as the camera id here: 0 is usually the back camera, 1 the front
