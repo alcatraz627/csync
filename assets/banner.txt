@@ -1,0 +1,28 @@
+          ██████╗ ███████╗██╗   ██╗███╗   ██╗ ██████╗
+         ██╔════╝ ██╔════╝╚██╗ ██╔╝████╗  ██║██╔════╝
+         ██║      ███████╗ ╚████╔╝ ██╔██╗ ██║██║
+         ██║      ╚════██║  ╚██╔╝  ██║╚██╗██║██║
+         ╚██████╗ ███████║   ██║   ██║ ╚████║╚██████╗
+          ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═══╝ ╚═════╝
+              one household, finally on speaking terms
+    ────────────────────────────────────────────────────────────
+
+      ┌───────────────┐   "right, roll call. everyone on the tailnet?"
+      │   M5 PRO   ▟█▙ │   the console. runs the show, tells the rest what to do
+      └───────────────┘
+             │
+      ┌──────┴─────────────────────┬───────────────┬──────────────┐
+      │                            │               │              │
+   ┌──┴───┐ "paired. i'm       ┌───┴──┐ *blinks   ( android ) "i  { iPhone }
+   │ AIR  │  small, not slow." │  Pi  │  led*      relay for the   " i suppose
+   │ ▝▀▘  │                    │ .::. │ "i keep    bulbs, cheers"   i'll allow
+   └──────┘                    └──────┘  the        the messages"    a webhook "
+    the petite one              home,   assistant                    the haughty one
+                                sleek + tireless
+
+      the dumb five, across the house:      the smart three, listening:
+        (o) (o) (o) (o) (o)                   [~] [~] [~]
+        "we just glow. leave us."             "we click when told. politely."
+    ────────────────────────────────────────────────────────────
+        reach my laptops, my phone, my server, and my lights,
+                    all from where i already am.

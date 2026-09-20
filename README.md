@@ -17,7 +17,15 @@
 
 ---
 
-## What it is
+## But why
+
+Your machines are scattered. A laptop in another room, a Pi in a cupboard, a
+friend's Mac across the city, each on its own network and its own OS. The moment
+you want to do something on one of them you are up and walking, or fighting with
+IP addresses, port forwards, and a VPN, or talking someone through steps over
+chat. csync collapses that distance: from where you already sit, you reach any of
+them and act. The reverse tunnel and the remote commands are not the point, they
+are how it gets out of your way.
 
 csync turns your Mac into a console that can operate another laptop over a tunnel
 that the other laptop opens itself. The other laptop installs nothing. It pastes
@@ -161,5 +169,11 @@ bash tests/loopback.sh                    # end-to-end on one machine
 
 | Document | What it covers |
 |---|---|
-| [docs/spec.md](docs/spec.md) | the full definition: routes, the token, the bootstrap steps, the security model, and the teardown guarantee |
+| [docs/architecture.md](docs/architecture.md) | the map: console, target, route, relay, and how a target registers |
+| [docs/agent-runbook.md](docs/agent-runbook.md) | hyper-specific fix guide, with the exact checks for a stuck pairing |
+| [docs/segments.md](docs/segments.md) | each moving part, its code, its state, and how to poke it |
+| [docs/development.md](docs/development.md) | dos and do-nots for extending csync, and where it is headed |
+| [docs/security.md](docs/security.md) | the trust boundary, the invite key, and what the model does not defend |
+| [docs/principles.md](docs/principles.md) | what csync must never become |
+| [docs/spec.md](docs/spec.md) | the full normative definition: routes, the token, bootstrap, teardown |
 | [examples/pihub](examples/pihub) | a small hub example served on a Pi |
