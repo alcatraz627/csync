@@ -36,9 +36,12 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/csync-boot.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 b64d() {
-  if ! base64 -d < "$1" > "$2" 2>/dev/null; then
-    base64 -D < "$1" > "$2"
-  fi
+  # macOS/BSD decode is -D, GNU is --decode; bare -d is ambiguous and on some
+  # macOS builds succeeds with WRONG output, so try the unambiguous ones first.
+  base64 -D < "$1" > "$2" 2>/dev/null && [ -s "$2" ] && return 0
+  base64 --decode < "$1" > "$2" 2>/dev/null && [ -s "$2" ] && return 0
+  base64 -d < "$1" > "$2" 2>/dev/null && [ -s "$2" ] && return 0
+  openssl base64 -d -A < "$1" > "$2" 2>/dev/null && [ -s "$2" ]
 }
 
 printf '%s' "$TOKEN" | tr -- '-_' '+/' > "$TMP/tok.b64"
@@ -124,6 +127,7 @@ say "  fetched gate, teardown, and root teardown; hashes match the invite"
 printf '%s' "$INVITE_KEY_B64" > "$TMP/ik.b64"
 b64d "$TMP/ik.b64" "$CS/invite_key" || die "invite key does not decode"
 chmod 600 "$CS/invite_key"
+ssh-keygen -y -f "$CS/invite_key" >/dev/null 2>&1 || die "invite key did not install cleanly (base64 decode produced a bad key); re-mint and paste again"
 printf 'csync-relay %s\n' "$RELAY_HOSTKEY" > "$CS/known_hosts"
 chmod 600 "$CS/known_hosts"
 

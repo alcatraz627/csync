@@ -52,6 +52,7 @@ def build_parser():
     s.add_argument("--ttl")
     s.add_argument("--expires")
     s.add_argument("--src")
+    s.add_argument("--relay-host", help="address the target dials for the reverse tunnel on the lan route; use the console's tailnet IP to reach the relay directly over the tailnet, skipping Funnel")
     s.add_argument("--target-port", type=int, default=22, help=argparse.SUPPRESS)
     s.add_argument("--show-script", action="store_true", help="print bootstrap.sh instead of the paste line")
 
@@ -275,7 +276,7 @@ def main(argv=None):
             if args.show_script:
                 out_human((paths.REPO / "bootstrap.sh").read_text())
             else:
-                result = invite.create(args.name, args.route, args.ttl, args.expires, args.src, args.target_port)
+                result = invite.create(args.name, args.route, args.ttl, args.expires, args.src, args.target_port, relay_host=args.relay_host)
                 if not args.json:
                     if result.get("warning"):
                         out_human(emit.yellow("note: " + result["warning"]))

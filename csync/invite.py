@@ -86,7 +86,7 @@ def allocate_port(cfg, hosts):
     raise CsyncError(INVITE, "no free tunnel port left", fix="csync teardown <name> on a host you are done with")
 
 
-def create(name, route="auto", ttl=None, expires=None, src=None, target_port=22, console_name=None):
+def create(name, route="auto", ttl=None, expires=None, src=None, target_port=22, console_name=None, relay_host=None):
     if not NAME_RE.match(name):
         raise CsyncError(USAGE, f"host name {name!r} must be 2-32 chars of a-z, 0-9, -", fix="csync invite rahul-mbp")
     if route not in ("auto", "lan", "funnel"):
@@ -112,7 +112,7 @@ def create(name, route="auto", ttl=None, expires=None, src=None, target_port=22,
         key_path = keys.ensure_key(paths.INVITES / invite_id / "id_ed25519", f"csync-invite-{invite_id}")
         pub = keys.pubkey(key_path)
         relay.add_line(invite_id, relay.authorized_line(invite_id, port, pub))
-        lan = f"{lan_ip()}:{cfg['relay_port']}"
+        lan = f"{relay_host or lan_ip()}:{cfg['relay_port']}"
         fun = ""
         if route in ("auto", "funnel"):
             try:
