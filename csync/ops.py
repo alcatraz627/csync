@@ -41,9 +41,15 @@ def _dir(h, sub):
 
 
 def stream_script(h, script, args=(), capture=True, stdin_extra=None):
-    """Run ops/<script> on the target through 'bash -s', never storing it there."""
+    """Run ops/<script> on the target through 'bash -s', never storing it there.
+
+    The verb's name rides along in CSYNC_OP so the target's own session log can say
+    a screenshot was taken instead of recording 'bash -s -- 1'. The gate on the
+    other end owns the wording; this only hands it the key.
+    """
     path = OPS / script
-    argv = tunnel.ssh_base(h) + ["bash", "-s", "--"] + [shlex.quote(a) for a in args]
+    op = script[:-3] if script.endswith(".sh") else script
+    argv = tunnel.ssh_base(h) + [f"CSYNC_OP={op}", "bash", "-s", "--"] + [shlex.quote(a) for a in args]
     with open(path, "rb") as fh:
         body = fh.read()
     r = subprocess.run(argv, input=body, capture_output=capture)

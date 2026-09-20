@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pihub</title>
+<script src="/tailwind.js"></script>
+<style>
+  /* Fallback so the page is still usable if tailwind.js was never vendored. */
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .tabbtn[aria-selected="true"] { border-color: rgb(59 130 246); color: rgb(226 232 240); }
+</style>
+</head>
+<body class="h-full bg-slate-950 text-slate-300">
+
+<div class="mx-auto max-w-4xl px-5 py-8">
+
+  <header class="mb-6 flex items-baseline justify-between border-b border-slate-800 pb-4">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight text-slate-100">pihub</h1>
+      <p id="subtitle" class="mt-1 text-sm text-slate-500">connecting&hellip;</p>
+    </div>
+    <span id="warmth" class="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-400">&mdash;</span>
+  </header>
+
+  <nav class="mb-6 flex gap-6 border-b border-slate-800" role="tablist">
+    <button class="tabbtn -mb-px border-b-2 border-transparent pb-3 text-sm text-slate-500 hover:text-slate-300"
+            role="tab" aria-selected="true" data-tab="camera">Camera</button>
+    <button class="tabbtn -mb-px border-b-2 border-transparent pb-3 text-sm text-slate-500 hover:text-slate-300"
+            role="tab" aria-selected="false" data-tab="system">System</button>
+  </nav>
+
+  <section id="tab-camera">
+    <div id="cam-error" class="mb-4 hidden rounded-lg border border-red-900/60 bg-red-950/40 p-4">
+      <p class="text-sm font-medium text-red-300">The camera is not working</p>
+      <p id="cam-error-msg" class="mt-1 break-words font-mono text-xs text-red-400/90"></p>
+      <details class="mt-3">
+        <summary class="cursor-pointer text-xs text-red-400/70">what the Pi reports about its cameras</summary>
+        <pre id="cam-listing" class="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-red-400/60"></pre>
+      </details>
+    </div>
+
+    <div class="overflow-hidden rounded-xl border border-slate-800 bg-black">
+      <img id="stream" alt="camera preview" class="block w-full">
+      <div id="cam-placeholder" class="flex aspect-[4/3] items-center justify-center text-sm text-slate-600">
+        starting the camera&hellip;
+      </div>
+    </div>
+
+    <div class="mt-4 flex items-center gap-3">
+      <button id="capture"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40">
+        Capture photo
+      </button>
+      <button id="restart"
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-900">
+        Retry camera
+      </button>
+      <span id="capture-note" class="text-xs text-slate-500"></span>
+    </div>
+
+    <div id="gallery" class="mt-6 grid grid-cols-3 gap-2 sm:grid-cols-6"></div>
+  </section>
+
+  <section id="tab-system" class="hidden">
+    <dl id="sysinfo" class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2"></dl>
+    <h2 class="mt-8 mb-2 text-xs uppercase tracking-wider text-slate-500">Disks</h2>
+    <pre id="disks" class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/50 p-4 text-xs text-slate-400"></pre>
+  </section>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let streaming = false;
+
+function showTab(name) {
+  for (const b of document.querySelectorAll('.tabbtn')) {
+    b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  }
+  $('tab-camera').classList.toggle('hidden', name !== 'camera');
+  $('tab-system').classList.toggle('hidden', name !== 'system');
+  if (name === 'system') loadSys();
+}
+for (const b of document.querySelectorAll('.tabbtn')) {
+  b.onclick = () => showTab(b.dataset.tab);
+}
+
+function camError(msg, listing) {
+  streaming = false;
+  $('stream').removeAttribute('src');
+  $('stream').classList.add('hidden');
+  $('cam-placeholder').classList.remove('hidden');
+  $('cam-placeholder').textContent = 'no picture';
+  $('cam-error').classList.remove('hidden');
+  $('cam-error-msg').textContent = msg || 'unknown error';
+  $('cam-listing').textContent = listing || '';
+  $('capture').disabled = true;
+}
+
+function camOk() {
+  $('cam-error').classList.add('hidden');
+  $('cam-placeholder').classList.add('hidden');
+  $('stream').classList.remove('hidden');
+  $('capture').disabled = false;
+}
+
+async function startCamera() {
+  $('cam-error').classList.add('hidden');
+  $('cam-placeholder').classList.remove('hidden');
+  $('cam-placeholder').textContent = 'starting the camera…';
+  // One still first: it returns a readable error, where a failing <img> would not.
+  try {
+    const r = await fetch('/api/frame', { cache: 'no-store' });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      const st = await fetch('/api/camera').then((x) => x.json()).catch(() => ({}));
+      camError(body.error, st.listing);
+      return;
+    }
+  } catch (e) {
+    camError(String(e), '');
+    return;
+  }
+  camOk();
+  streaming = true;
+  $('stream').src = '/api/stream?t=' + Date.now();
+}
+
+$('stream').onerror = () => { if (streaming) camError('the video stream dropped', ''); };
+$('restart').onclick = startCamera;
+
+$('capture').onclick = async () => {
+  $('capture').disabled = true;
+  $('capture-note').textContent = 'capturing…';
+  try {
+    const r = await fetch('/api/capture', { method: 'POST' });
+    const j = await r.json();
+    $('capture-note').textContent = r.ok ? ('saved ' + j.saved) : ('failed: ' + j.error);
+    if (r.ok) loadPhotos();
+  } catch (e) {
+    $('capture-note').textContent = 'failed: ' + e;
+  }
+  $('capture').disabled = false;
+};
+
+async function loadPhotos() {
+  const j = await fetch('/api/photos').then((r) => r.json()).catch(() => ({ photos: [] }));
+  $('gallery').innerHTML = j.photos.map((p) =>
+    '<a href="' + p.url + '" target="_blank" class="block overflow-hidden rounded-lg border border-slate-800">' +
+    '<img src="' + p.url + '" class="aspect-square w-full object-cover" alt="' + p.name + '"></a>'
+  ).join('');
+}
+
+const LABELS = {
+  model: 'Model', hostname: 'Hostname', os: 'OS', kernel: 'Kernel', arch: 'Architecture',
+  python: 'Python', uptime: 'Uptime', temperature: 'CPU temperature', throttled: 'Throttling',
+  loadavg: 'Load average', mem_total: 'Memory total', mem_available: 'Memory available',
+  swap_total: 'Swap total', service_uptime: 'This service, up', idle_for: 'Idle for',
+  stands_down_in: 'Stands down in',
+};
+
+async function loadSys() {
+  const j = await fetch('/api/sysinfo').then((r) => r.json()).catch(() => null);
+  if (!j) { $('sysinfo').innerHTML = '<dt class="text-red-400">could not read system info</dt>'; return; }
+  $('sysinfo').innerHTML = Object.keys(LABELS).map((k) =>
+    '<div class="flex justify-between gap-4 border-b border-slate-900 pb-2">' +
+    '<dt class="text-sm text-slate-500">' + LABELS[k] + '</dt>' +
+    '<dd class="text-right text-sm text-slate-200">' + (j[k] ?? '—') + '</dd></div>'
+  ).join('');
+  $('disks').textContent = j.disks || 'unavailable';
+  $('subtitle').textContent = j.model + ' · ' + j.hostname;
+  $('warmth').textContent = 'warm, stands down in ' + j.stands_down_in;
+}
+
+showTab('camera');
+startCamera();
+loadPhotos();
+loadSys();
+setInterval(loadSys, 15000);
+</script>
+</body>
+</html>

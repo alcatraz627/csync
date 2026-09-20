@@ -8,3 +8,4 @@ _*.claude.md
 .playwright-mcp/
 agent/dist/
 assist/dist/
+.claude/output/*/

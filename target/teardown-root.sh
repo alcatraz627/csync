@@ -47,6 +47,11 @@ else
   if [ "$ssh_enabled_before" != "enabled" ]; then
     systemctl disable ssh 2>/dev/null || systemctl disable sshd 2>/dev/null
   fi
+  # The bootstrap turns lingering on so the tunnel outlives a logout. Leave it on
+  # only if it was already on when we arrived.
+  if [ "${linger_before:-}" != "yes" ]; then
+    loginctl disable-linger "$user_name" 2>/dev/null
+  fi
 fi
 
 if [ ! -e "$cs/teardown.requested" ] && [ -f "$cs/teardown.sh" ]; then

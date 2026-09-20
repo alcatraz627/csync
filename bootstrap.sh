@@ -308,12 +308,21 @@ else
   fi
   SVC=ssh; systemctl list-unit-files sshd.service >/dev/null 2>&1 && SVC=sshd
   EN_BEFORE="\$(systemctl is-enabled \$SVC 2>/dev/null)"; AC_BEFORE="\$(systemctl is-active \$SVC 2>/dev/null)"
-  printf "cs='%s'\nuser_name='%s'\ndeadline='%s'\nos='%s'\nssh_enabled_before='%s'\nssh_active_before='%s'\ndropin_existed='%s'\n" "\$CS" "\$USER_NAME" "\$DEADLINE" "\$OS" "\$EN_BEFORE" "\$AC_BEFORE" "\$DROPIN_EXISTED" > "\$RD/state.env"
+  LINGER_BEFORE="\$(loginctl show-user "\$USER_NAME" -p Linger --value 2>/dev/null)"
+  printf "cs='%s'\nuser_name='%s'\ndeadline='%s'\nos='%s'\nssh_enabled_before='%s'\nssh_active_before='%s'\ndropin_existed='%s'\nlinger_before='%s'\n" "\$CS" "\$USER_NAME" "\$DEADLINE" "\$OS" "\$EN_BEFORE" "\$AC_BEFORE" "\$DROPIN_EXISTED" "\$LINGER_BEFORE" > "\$RD/state.env"
   mkdir -p /etc/ssh/sshd_config.d
   printf 'ListenAddress 127.0.0.1\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers %s\n' "\$USER_NAME" > "\$DROPIN"
   chmod 644 "\$DROPIN"
   systemctl enable --now \$SVC >/dev/null 2>&1; systemctl reload \$SVC >/dev/null 2>&1
   echo "CHANGED: sshd on, loopback only, keys only, one user (was enabled=\$EN_BEFORE active=\$AC_BEFORE)"
+  # Without lingering there is no user manager while nobody is logged in, so the
+  # tunnel started by systemd-run --user dies with the session that started it.
+  # On a headless machine that is every session. Teardown puts this back.
+  if [ "\$LINGER_BEFORE" != "yes" ]; then
+    loginctl enable-linger "\$USER_NAME" >/dev/null 2>&1 && echo "CHANGED: enabled lingering for \$USER_NAME so the tunnel outlives the login session"
+  else
+    echo "KEPT: lingering for \$USER_NAME was already on"
+  fi
   cp -f "\$CS/teardown-root.sh" "\$RD/teardown-root.sh"; chmod 700 "\$RD/teardown-root.sh"
   systemd-run --unit="csync-ttl-\$ID" --on-active=15 --on-unit-active=15 /bin/bash "\$RD/teardown-root.sh" "\$ID" >/dev/null 2>&1
   echo "CHANGED: timed cleanup armed"

@@ -9,17 +9,47 @@ LOG="$CS/session.log"
 cmd="${SSH_ORIGINAL_COMMAND:-}"
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
 force=0
-case "$cmd" in
-  "CSYNC_FORCE=1 "*) force=1; cmd="${cmd#CSYNC_FORCE=1 }" ;;
+op=""
+# The console marks a command it has already warned about with CSYNC_FORCE=1, and
+# names the csync verb with CSYNC_OP. Strip both before anything else reads $cmd,
+# so the deny list and the log see the real command underneath.
+while :; do
+  case "$cmd" in
+    "CSYNC_FORCE=1 "*) force=1; cmd="${cmd#CSYNC_FORCE=1 }" ;;
+    "CSYNC_OP="*" "*)  op="${cmd%% *}"; op="${op#CSYNC_OP=}"; cmd="${cmd#* }" ;;
+    *) break ;;
+  esac
+done
+
+# The console picks the key, this gate owns the words. An unrecognised key is
+# written as its bare name so nothing can smuggle a sentence into the record the
+# owner of this machine reads.
+# The character list is spelled out rather than written a-z0-9: under most
+# locales a bracket range matches by collation order, where A through Z fall
+# inside a-z, and CSYNC_OP=SAFE then reaches the log as prose.
+case "$op" in
+  *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) op="" ;;
+esac
+case "$op" in
+  shot)    did="took a screenshot" ;;
+  say)     did="spoke a message out loud" ;;
+  open)    did="opened something on this screen" ;;
+  info)    did="read system information" ;;
+  logs)    did="collected log files" ;;
+  persist) did="changed whether csync starts at boot" ;;
+  "")      did="" ;;
+  *)       did="ran the $op operation" ;;
 esac
 
 if [ "$cmd" = "true" ]; then
   exec /usr/bin/true
-elif [ $force -eq 1 ]; then
-  printf '%s\t%s\t[force]\n' "$ts" "$cmd" >> "$LOG"
-else
-  printf '%s\t%s\n' "$ts" "${cmd:-<interactive shell>}" >> "$LOG"
 fi
+
+TAB="$(printf '\t')"
+note=""
+[ -n "$did" ] && note="$note$TAB($did)"
+[ $force -eq 1 ] && note="$note$TAB[force]"
+printf '%s\t%s%s\n' "$ts" "${cmd:-<interactive shell>}" "$note" >> "$LOG"
 
 refuse() {
   printf '%s\trefused: %s\n' "$ts" "$1" >> "$LOG"
