@@ -1,0 +1,12 @@
+[Unit]
+Description=Force the Pi HDMI0 connector to digital mode for csync playback
+After=systemd-udev-trigger.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/csync-force-hdmi-digital
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

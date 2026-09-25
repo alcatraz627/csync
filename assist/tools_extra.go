@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,44 +64,29 @@ func cameraPresent() bool {
 func cameraTool(action, durationSec string) map[string]any {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "", "status", "detect":
-		bin := cameraBin(true)
-		if bin == "" {
-			return map[string]any{"present": false, "detail": "no libcamera/rpicam tools installed"}
-		}
-		out, _ := exec.Command(bin, "--list-cameras").CombinedOutput()
-		return map[string]any{"present": cameraPresent(), "detail": truncate(strings.TrimSpace(string(out)), 1000)}
+		result := mediaGet("/v1/camera/status")
+		result["present"] = cameraPresent()
+		return result
 	case "capture", "photo", "image":
-		bin := cameraBin(true)
-		if bin == "" {
-			return map[string]any{"error": "no camera tool installed"}
+		result := mediaRequest(http.MethodPost, "/v1/camera/photo", map[string]any{}, 15*time.Second)
+		if name, ok := result["name"].(string); ok {
+			result["media_url"] = "/media/" + name
+			result["media_type"] = "image"
 		}
-		if !cameraPresent() {
-			return map[string]any{"error": "no camera detected on this device"}
-		}
-		name := "cap-" + time.Now().Format("20060102-150405") + ".jpg"
-		path := filepath.Join(mediaDir(), name)
-		if out, err := exec.Command(bin, "-n", "-t", "800", "-o", path).CombinedOutput(); err != nil {
-			return map[string]any{"error": "capture failed: " + strings.TrimSpace(string(out))}
-		}
-		return map[string]any{"ok": true, "path": path, "media_url": "/media/" + name, "media_type": "image"}
+		return result
 	case "record", "video":
-		bin := cameraBin(false)
-		if bin == "" {
-			return map[string]any{"error": "no camera video tool installed"}
-		}
-		if !cameraPresent() {
-			return map[string]any{"error": "no camera detected on this device"}
-		}
 		secs := 5
 		if d, err := strconv.Atoi(strings.TrimSpace(durationSec)); err == nil && d > 0 && d <= 120 {
 			secs = d
 		}
-		name := "vid-" + time.Now().Format("20060102-150405") + ".mp4"
-		path := filepath.Join(mediaDir(), name)
-		if out, err := exec.Command(bin, "-n", "-t", fmt.Sprintf("%d", secs*1000), "--codec", "libav", "-o", path).CombinedOutput(); err != nil {
-			return map[string]any{"error": "record failed: " + strings.TrimSpace(string(out))}
+		result := mediaRequest(http.MethodPost, "/v1/camera/record/clip",
+			map[string]any{"durationSeconds": secs}, time.Duration(secs+125)*time.Second)
+		if name, ok := result["name"].(string); ok {
+			result["media_url"] = "/media/" + name
+			result["media_type"] = "video"
+			result["seconds"] = secs
 		}
-		return map[string]any{"ok": true, "path": path, "media_url": "/media/" + name, "media_type": "video", "seconds": secs}
+		return result
 	default:
 		return map[string]any{"error": "unknown camera action " + action + " (use status, capture, or record)"}
 	}

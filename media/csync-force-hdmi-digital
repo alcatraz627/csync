@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+attempt=0
+while [ "$attempt" -lt 15 ]; do
+    for connector in /sys/class/drm/card*-HDMI-A-1/status; do
+        if [ -e "$connector" ]; then
+            printf on-digital > "$connector"
+            exit 0
+        fi
+    done
+    attempt=$((attempt + 1))
+    sleep 1
+done
+
+echo "HDMI0 connector did not appear" >&2
+exit 1

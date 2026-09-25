@@ -56,7 +56,7 @@ func toolDeclarations() []gTool {
 		},
 		{
 			Name:        "camera",
-			Description: "Use this home server's camera. action=status detects the camera and reports whether one is attached; action=capture takes a photo; action=record films a short clip (duration_seconds, default 5). Photos and clips are saved and returned with a media_url the app shows inline.",
+			Description: "Use the same Pi camera service as the app's Camera tab. action=status reports live viewing and recording; action=capture saves a photo; action=record films a short clip (duration_seconds, default 5). Photos and clips appear in the app and return a media_url here.",
 			Parameters: gSchema{
 				Type: "object",
 				Properties: map[string]gSchema{
@@ -108,13 +108,88 @@ func toolDeclarations() []gTool {
 			Description: "Report this Raspberry Pi's temperature, throttling state, CPU clock, and core voltage. No arguments.",
 			Parameters:  gSchema{Type: "object", Properties: map[string]gSchema{}},
 		},
+		{
+			Name: "media_drives", Description: "List connected and absent media drives, with their observed status.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{}},
+		},
+		{
+			Name: "media_search", Description: "Find media by file name across connected drives.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"query": {Type: "string", Description: "part of a file name"},
+			}, Required: []string{"query"}},
+		},
+		{
+			Name: "media_status", Description: "Read observed playback state for the Pi or active phone player.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+			}, Required: []string{"target"}},
+		},
+		{
+			Name: "media_play", Description: "Play a media_search item on the Pi projector. Reports applied only after the Pi player accepts the command.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"item_id": {Type: "string", Description: "opaque item ID from media_search"},
+			}, Required: []string{"item_id"}},
+		},
+		{
+			Name: "media_cast_youtube", Description: "Play one YouTube video on the Pi projector, starting muted. Uses the same player and controls as the Media screen.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"url": {Type: "string", Description: "HTTPS YouTube watch, Shorts, live, or youtu.be video URL"},
+			}, Required: []string{"url"}},
+		},
+		{
+			Name: "media_pause", Description: "Pause playback on the Pi or active phone. Phone commands may remain queued until the app acknowledges them.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+			}, Required: []string{"target"}},
+		},
+		{
+			Name: "media_seek", Description: "Seek in the Pi or active phone player; phone application is acknowledged asynchronously.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target":      {Type: "string", Description: "pi or phone"},
+				"position_ms": {Type: "integer", Description: "absolute position in milliseconds"},
+			}, Required: []string{"target", "position_ms"}},
+		},
+		{
+			Name: "media_resume", Description: "Resume the Pi or active phone player.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+			}, Required: []string{"target"}},
+		},
+		{
+			Name: "media_stop", Description: "Stop playback on the Pi or active phone.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+			}, Required: []string{"target"}},
+		},
+		{
+			Name: "media_volume", Description: "Set player volume from 0 to 100 on the Pi or active phone.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+				"value":  {Type: "number", Description: "volume from 0 to 100"},
+			}, Required: []string{"target", "value"}},
+		},
+		{
+			Name: "media_speed", Description: "Set player speed from 0.25 to 4 on the Pi or active phone.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"target": {Type: "string", Description: "pi or phone"},
+				"value":  {Type: "number", Description: "speed from 0.25 to 4"},
+			}, Required: []string{"target", "value"}},
+		},
+		{
+			Name: "media_diagnose", Description: "Check media service, drives, Pi power, and HDMI observations even if the media service is down.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{}},
+		},
 	}}}
 }
 
 // executeTool runs one tool and returns a response map. It never throws; a
 // failure comes back as {"error": ...} so the model can react.
 func executeTool(name string, args map[string]any) map[string]any {
-	log.Printf("tool %s args=%v", name, args)
+	if name == "media_cast_youtube" {
+		log.Printf("tool %s", name)
+	} else {
+		log.Printf("tool %s args=%v", name, args)
+	}
 	switch name {
 	case "home_health":
 		return map[string]any{"report": homeHealth()}
@@ -136,6 +211,30 @@ func executeTool(name string, args map[string]any) map[string]any {
 		return topProcesses(str(args["by"]))
 	case "pi_vitals":
 		return piVitals()
+	case "media_drives":
+		return mediaGet("/v1/drives")
+	case "media_search":
+		return mediaSearch(str(args["query"]))
+	case "media_status":
+		return mediaStatus(str(args["target"]))
+	case "media_play":
+		return mediaCommand("pi", "play", str(args["item_id"]), 0)
+	case "media_cast_youtube":
+		return mediaCastYouTube(str(args["url"]))
+	case "media_pause":
+		return mediaCommand(str(args["target"]), "pause", "", 0)
+	case "media_seek":
+		return mediaCommand(str(args["target"]), "seek", "", args["position_ms"])
+	case "media_resume":
+		return mediaCommand(str(args["target"]), "resume", "", 0)
+	case "media_stop":
+		return mediaCommand(str(args["target"]), "stop", "", 0)
+	case "media_volume":
+		return mediaCommand(str(args["target"]), "volume", "", args["value"])
+	case "media_speed":
+		return mediaCommand(str(args["target"]), "speed", "", args["value"])
+	case "media_diagnose":
+		return mediaDiagnose()
 	default:
 		return map[string]any{"error": "unknown tool " + name}
 	}

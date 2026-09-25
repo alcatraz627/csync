@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1740" viewBox="0 0 1640 1740" role="img" aria-labelledby="title desc">
+  <title id="title">csync Android direction two: task-led screens</title>
+  <desc id="desc">Eight proposed phone screens: Home, Media library, Player, Share, Chat, Camera, Tools, and Settings. This is a design proposal, not the current app.</desc>
+  <defs>
+    <style>
+      text{font-family:Inter,Roboto,Arial,sans-serif;fill:#17212b}
+      .title{font-size:25px;font-weight:750}
+      .h{font-size:21px;font-weight:750}
+      .sub{font-size:13px;fill:#637181}
+      .label{font-size:11px;font-weight:700;letter-spacing:1px;fill:#657383}
+      .body{font-size:15px}
+      .small{font-size:12px;fill:#637181}
+      .white{fill:#fff}
+      .inverse{fill:#fff}
+      .muted-inverse{fill:#aebdcb}
+      .strong{font-weight:700}
+      .accent{fill:#df5534}
+      .stroke{stroke:#dce3e9;stroke-width:1}
+    </style>
+    <g id="shell">
+      <rect width="360" height="760" rx="30" fill="#f7f9fb" stroke="#d3dbe3" stroke-width="2"/>
+      <text x="24" y="29" font-size="11" fill="#637181">9:41</text>
+      <circle cx="313" cy="23" r="5" fill="#657383"/>
+      <rect x="324" y="18" width="17" height="10" rx="2" fill="#657383"/>
+      <rect x="0" y="48" width="360" height="1" fill="#e5eaf0"/>
+    </g>
+    <g id="nav">
+      <rect x="1" y="695" width="358" height="64" rx="0" fill="#fff"/>
+      <path d="M1 695h358" stroke="#dce3e9"/>
+      <text x="27" y="722" font-size="17">⌂</text><text x="21" y="742" font-size="10">Home</text>
+      <text x="108" y="722" font-size="17">▤</text><text x="100" y="742" font-size="10">Media</text>
+      <text x="192" y="722" font-size="17">↗</text><text x="180" y="742" font-size="10">Share</text>
+      <text x="271" y="722" font-size="17">▣</text><text x="262" y="742" font-size="10">Chat</text>
+      <text x="325" y="722" font-size="17">⋯</text><text x="319" y="742" font-size="10">More</text>
+    </g>
+    <g id="mini">
+      <rect x="12" y="632" width="336" height="54" rx="12" fill="#17212b"/>
+      <rect x="21" y="642" width="3" height="34" rx="2" fill="#ed7152"/>
+      <text x="34" y="651" class="muted-inverse" font-size="10">PI · PLAYING</text>
+      <text x="34" y="671" class="inverse" font-size="13" font-weight="700">Evening film</text>
+      <text x="269" y="666" class="inverse" font-size="20">Ⅱ</text>
+      <text x="312" y="666" class="inverse" font-size="20">□</text>
+    </g>
+  </defs>
+  <rect width="1640" height="1740" fill="#edf1f5"/>
+  <text x="46" y="56" class="title">csync · direction 2</text>
+  <text x="46" y="82" class="sub">Task-led navigation. The playback bar appears only when a session is active. Concept for review, not an implemented UI.</text>
+
+  <g transform="translate(45 116)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Home</text>
+    <text x="24" y="108" class="sub">Your devices and what they can do</text>
+    <rect x="24" y="130" width="312" height="76" rx="16" fill="#fff" class="stroke"/>
+    <circle cx="43" cy="157" r="5" fill="#18a26c"/><text x="57" y="162" class="body strong">Raspberry Pi</text>
+    <text x="57" y="181" class="small">Online · screen connected · 1 drive</text>
+    <text x="303" y="172" font-size="20">›</text>
+    <text x="24" y="244" class="label">DO SOMETHING</text>
+    <rect x="24" y="260" width="312" height="68" rx="16" fill="#d74e30"/>
+    <text x="44" y="289" class="white strong" font-size="17">Browse Pi media</text>
+    <text x="44" y="310" class="white" font-size="12">Choose a file and output screen</text>
+    <rect x="24" y="340" width="150" height="78" rx="16" fill="#fff" class="stroke"/>
+    <text x="42" y="370" class="body strong">Share a file ↗</text>
+    <text x="42" y="390" class="small">Send to a device</text>
+    <rect x="186" y="340" width="150" height="78" rx="16" fill="#fff" class="stroke"/>
+    <text x="204" y="370" class="body strong">Ask the Pi ▣</text>
+    <text x="204" y="390" class="small">Continue a chat</text>
+    <text x="24" y="456" class="label">PICK UP</text>
+    <text x="24" y="490" class="body strong">Evening film</text><text x="24" y="511" class="small">Pi USB · 31 min left</text>
+    <text x="294" y="501" class="accent strong" font-size="14">Resume</text>
+    <path d="M24 528h312" stroke="#dce3e9"/>
+    <text x="24" y="560" class="body strong">Pi camera</text><text x="24" y="581" class="small">View, photograph, or record</text>
+    <text x="320" y="570" font-size="22">›</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(442 116)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Media</text>
+    <text x="24" y="108" class="sub">Pi USB · 1,243 files</text>
+    <rect x="24" y="130" width="312" height="45" rx="12" fill="#fff" class="stroke"/>
+    <text x="42" y="159" class="sub" font-size="15">⌕  Search drives and files</text>
+    <text x="24" y="212" class="accent strong" font-size="14">All files</text>
+    <text x="112" y="212" class="small">Folders</text>
+    <text x="195" y="212" class="small">History</text>
+    <path d="M24 224h312" stroke="#dce3e9"/>
+    <rect x="24" y="244" width="312" height="44" rx="10" fill="#eaf2f2"/>
+    <text x="39" y="272" class="body strong">▣  Pi USB</text>
+    <text x="259" y="272" class="small">Connected</text>
+    <text x="24" y="325" class="label">RECENTLY PLAYED</text>
+    <text x="24" y="359" class="body strong">Evening film</text><text x="24" y="380" class="small">Video · 31 min left</text>
+    <text x="295" y="365" class="accent strong" font-size="14">Play</text>
+    <path d="M24 398h312" stroke="#dce3e9"/>
+    <text x="24" y="431" class="label">ON PI USB</text>
+    <text x="24" y="467" class="body strong">▤  Films</text><text x="318" y="467">›</text>
+    <path d="M24 484h312" stroke="#dce3e9"/>
+    <text x="24" y="517" class="body strong">▤  Music</text><text x="318" y="517">›</text>
+    <path d="M24 534h312" stroke="#dce3e9"/>
+    <text x="24" y="567" class="body strong">▣  Camera captures</text><text x="318" y="567">›</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(839 116)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="small">‹  Media</text>
+    <text x="24" y="119" class="title">Evening film</text>
+    <text x="24" y="140" class="sub">Playing on Pi screen · Pi USB</text>
+    <rect x="24" y="164" width="312" height="190" rx="18" fill="#17212b"/>
+    <circle cx="180" cy="258" r="34" fill="#324454"/>
+    <text x="166" y="268" class="inverse" font-size="30">Ⅱ</text>
+    <text x="24" y="392" class="body strong">42:18</text><text x="293" y="392" class="small">1:13:30</text>
+    <rect x="24" y="410" width="312" height="5" rx="3" fill="#dce3e9"/>
+    <rect x="24" y="410" width="180" height="5" rx="3" fill="#df5534"/>
+    <circle cx="204" cy="412" r="8" fill="#df5534"/>
+    <text x="54" y="479" font-size="27">↺</text><text x="160" y="479" font-size="30">Ⅱ</text><text x="277" y="479" font-size="27">↻</text>
+    <rect x="24" y="513" width="312" height="52" rx="13" fill="#fff" class="stroke"/>
+    <text x="42" y="544" class="body">Volume</text><text x="274" y="544" class="body strong">10%</text>
+    <rect x="24" y="579" width="149" height="41" rx="11" fill="#fff" class="stroke"/>
+    <text x="76" y="605" class="body strong">Settings</text>
+    <rect x="187" y="579" width="149" height="41" rx="11" fill="#fff" class="stroke"/>
+    <text x="243" y="605" class="body strong">Stop</text>
+    <use href="#nav"/>
+  </g>
+
+  <g transform="translate(1236 116)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Share</text>
+    <text x="24" y="108" class="sub">Send to your own devices</text>
+    <text x="24" y="151" class="label">RECIPIENT</text>
+    <rect x="24" y="166" width="312" height="66" rx="14" fill="#fff" class="stroke"/>
+    <circle cx="47" cy="198" r="5" fill="#18a26c"/>
+    <text x="63" y="195" class="body strong">MacBook Pro</text>
+    <text x="63" y="214" class="small">Online · change recipient</text>
+    <text x="307" y="205" font-size="20">⌄</text>
+    <text x="24" y="270" class="label">MESSAGE OR FILE</text>
+    <rect x="24" y="286" width="312" height="126" rx="16" fill="#fff" class="stroke"/>
+    <text x="41" y="320" class="sub">Write a message…</text>
+    <text x="41" y="387" class="accent strong" font-size="15">＋ Attach file</text>
+    <rect x="24" y="427" width="312" height="49" rx="12" fill="#d74e30"/>
+    <text x="158" y="457" class="white strong" font-size="15">Send</text>
+    <text x="24" y="519" class="label">INBOX</text>
+    <text x="24" y="554" class="body strong">Shared photo.jpg</text>
+    <text x="24" y="576" class="small">From MacBook Pro · 10:34</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(45 928)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Chat</text>
+    <text x="24" y="108" class="sub">Pi assistant · online</text>
+    <text x="302" y="88" class="accent strong" font-size="14">New</text>
+    <rect x="24" y="132" width="312" height="44" rx="12" fill="#fff" class="stroke"/>
+    <text x="42" y="160" class="sub">⌕  Search conversations</text>
+    <text x="24" y="213" class="label">TODAY</text>
+    <text x="24" y="246" class="body strong">Find a film for tonight</text>
+    <text x="24" y="268" class="small">Pi assistant · 11:12</text>
+    <text x="318" y="253">›</text>
+    <path d="M24 285h312" stroke="#dce3e9"/>
+    <text x="24" y="319" class="body strong">What is on my drives?</text>
+    <text x="24" y="341" class="small">Pi assistant · Yesterday</text>
+    <text x="318" y="326">›</text>
+    <path d="M24 358h312" stroke="#dce3e9"/>
+    <text x="24" y="397" class="label">QUICK ASK</text>
+    <text x="24" y="432" class="body">Search my media</text>
+    <text x="24" y="469" class="body">Check Pi health</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(442 928)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Pi camera</text>
+    <text x="24" y="108" class="sub">Live · preview stops when you leave</text>
+    <rect x="24" y="138" width="312" height="294" rx="15" fill="#22313c"/>
+    <text x="116" y="289" class="muted-inverse" font-size="16">Live preview</text>
+    <circle cx="180" cy="491" r="35" fill="#fff" stroke="#df5534" stroke-width="4"/>
+    <text x="24" y="500" class="body strong">Photos</text>
+    <text x="277" y="500" class="body strong">Record</text>
+    <text x="24" y="560" class="label">RECENT CAPTURES</text>
+    <text x="24" y="592" class="body strong">Today at 10:42</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(839 928)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Tools</text>
+    <text x="24" y="108" class="sub">Utilities and diagnostics</text>
+    <text x="24" y="156" class="label">DEVICE</text>
+    <text x="24" y="192" class="body strong">System activity</text>
+    <text x="24" y="212" class="small">CPU, available memory, swap, temperature</text>
+    <text x="319" y="201">›</text>
+    <path d="M24 229h312" stroke="#dce3e9"/>
+    <text x="24" y="263" class="body strong">Pi connection</text>
+    <text x="24" y="283" class="small">Drive, screen, camera, and service health</text>
+    <text x="319" y="272">›</text>
+    <path d="M24 300h312" stroke="#dce3e9"/>
+    <text x="24" y="346" class="label">APP</text>
+    <text x="24" y="382" class="body strong">Updates</text>
+    <text x="24" y="402" class="small">Installed 2.11 · check Pi for newer build</text>
+    <text x="319" y="391">›</text>
+    <path d="M24 419h312" stroke="#dce3e9"/>
+    <text x="24" y="453" class="body strong">Widgets and quick actions</text>
+    <text x="24" y="473" class="small">Shortcuts and home screen controls</text>
+    <text x="319" y="462">›</text>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+
+  <g transform="translate(1236 928)">
+    <use href="#shell"/>
+    <text x="24" y="88" class="title">Settings</text>
+    <text x="24" y="108" class="sub">Connections, playback, appearance</text>
+    <text x="24" y="156" class="label">DEVICES</text>
+    <text x="24" y="193" class="body strong">My device roster</text>
+    <text x="24" y="213" class="small">Pi, Mac, and saved peers</text>
+    <path d="M24 230h312" stroke="#dce3e9"/>
+    <text x="24" y="265" class="body strong">Network access</text>
+    <text x="24" y="285" class="small">Tailscale and local sharing</text>
+    <path d="M24 302h312" stroke="#dce3e9"/>
+    <text x="24" y="347" class="label">PLAYBACK</text>
+    <text x="24" y="383" class="body strong">Default output</text>
+    <text x="259" y="383" class="small">Ask each time</text>
+    <path d="M24 403h312" stroke="#dce3e9"/>
+    <text x="24" y="438" class="body strong">Pi startup volume</text>
+    <text x="282" y="438" class="small">Muted</text>
+    <path d="M24 455h312" stroke="#dce3e9"/>
+    <text x="24" y="500" class="label">APPEARANCE</text>
+    <text x="24" y="536" class="body strong">Theme</text>
+    <text x="270" y="536" class="small">System</text>
+    <text x="24" y="580" class="body strong">Accent</text>
+    <circle cx="267" cy="574" r="9" fill="#df5534"/>
+    <circle cx="293" cy="574" r="9" fill="#167d82"/>
+    <circle cx="319" cy="574" r="9" fill="#7951a4"/>
+    <use href="#mini"/><use href="#nav"/>
+  </g>
+</svg>

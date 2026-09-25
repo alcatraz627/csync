@@ -1,0 +1,16 @@
+[Unit]
+Description=csync media browser and player
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=%h/.local/share/csync-media
+ExecStart=/usr/bin/python3 -m media.server --config %h/.config/csync/media.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

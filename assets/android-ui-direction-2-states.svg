@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2030" height="880" viewBox="0 0 2030 880" role="img" aria-labelledby="title desc">
+  <title id="title">csync Android direction two: critical media states</title>
+  <desc id="desc">Proposed share handoff, output choice, file transfer, disconnected drive, and simultaneous sessions. Example content only.</desc>
+  <defs>
+    <style>
+      text{font-family:Inter,Roboto,Arial,sans-serif;fill:#17212b}
+      .h{font-size:22px;font-weight:750}.body{font-size:15px}.strong{font-weight:700}
+      .small{font-size:12px;fill:#647282}.label{font-size:11px;font-weight:750;letter-spacing:1px;fill:#647282}
+      .white{fill:#fff}.accent{fill:#d74e30}.inverse{fill:#fff}.dim{fill:#aebdcb}
+    </style>
+    <g id="phone">
+      <rect width="360" height="760" rx="28" fill="#f7f9fb" stroke="#d5dee7" stroke-width="2"/>
+      <text x="24" y="28" class="small">9:41</text>
+      <rect x="1" y="695" width="358" height="64" fill="#fff"/>
+      <path d="M1 695h358" stroke="#dce3e9"/>
+      <text x="23" y="734" class="small">Home</text>
+      <text x="98" y="734" class="small">Media</text>
+      <text x="179" y="734" class="small">Share</text>
+      <text x="260" y="734" class="small">Chat</text>
+      <text x="314" y="734" class="small">More</text>
+    </g>
+  </defs>
+  <rect width="2030" height="880" fill="#edf1f5"/>
+  <text x="36" y="42" class="h">Media states · proposed</text>
+  <text x="36" y="64" class="small">Examples for review. Transfer cancellation and the new layouts are not implemented in the current app.</text>
+
+  <g transform="translate(34 88)">
+    <use href="#phone"/>
+    <text x="24" y="88" class="h">Shared from YouTube</text>
+    <text x="24" y="110" class="small">One video from the YouTube app</text>
+    <rect x="24" y="145" width="312" height="110" rx="14" fill="#fff" stroke="#dce3e9"/>
+    <text x="42" y="180" class="body strong">Me at the zoo</text>
+    <text x="42" y="207" class="small">YouTube video</text>
+    <text x="42" y="231" class="small">Playback may be unavailable for some videos</text>
+    <text x="24" y="297" class="label">WHAT SHOULD CSYNC DO?</text>
+    <rect x="24" y="315" width="312" height="65" rx="14" fill="#d74e30"/>
+    <text x="43" y="344" class="white strong" font-size="16">Play on Pi screen</text>
+    <text x="43" y="363" class="white" font-size="12">Starts muted; controls stay in csync</text>
+    <rect x="24" y="394" width="312" height="65" rx="14" fill="#fff" stroke="#dce3e9"/>
+    <text x="43" y="423" class="body strong">Send link to peer</text>
+    <text x="43" y="443" class="small">Share the link with a named device</text>
+    <text x="24" y="501" class="small">No URL entry needed</text>
+  </g>
+
+  <g transform="translate(435 88)">
+    <use href="#phone"/>
+    <text x="24" y="88" class="h">Nature clip.mp4</text>
+    <text x="24" y="110" class="small">Pi USB · video · 8 min 42 sec</text>
+    <rect x="24" y="139" width="312" height="245" rx="16" fill="#17212b"/>
+    <text x="139" y="268" class="inverse" font-size="32">▶</text>
+    <text x="24" y="426" class="label">CHOOSE OUTPUT</text>
+    <rect x="24" y="444" width="312" height="68" rx="14" fill="#fff" stroke="#dce3e9"/>
+    <text x="43" y="471" class="body strong">Pi screen</text>
+    <text x="43" y="493" class="small">Play from Pi USB · starts muted</text>
+    <text x="310" y="484" class="accent">›</text>
+    <rect x="24" y="524" width="312" height="68" rx="14" fill="#fff" stroke="#dce3e9"/>
+    <text x="43" y="551" class="body strong">This phone</text>
+    <text x="43" y="573" class="small">Uses HDMI display when connected</text>
+    <text x="310" y="564" class="accent">›</text>
+  </g>
+
+  <g transform="translate(836 88)">
+    <use href="#phone"/>
+    <text x="24" y="88" class="h">Sending to Pi</text>
+    <text x="24" y="110" class="small">Phone file · Pi USB</text>
+    <rect x="24" y="145" width="312" height="201" rx="16" fill="#fff" stroke="#dce3e9"/>
+    <text x="43" y="181" class="body strong">Holiday video.mp4</text>
+    <text x="43" y="208" class="small">Copying to Pi USB</text>
+    <text x="290" y="207" class="body strong">46%</text>
+    <rect x="43" y="230" width="274" height="7" rx="3" fill="#e0e6ec"/>
+    <rect x="43" y="230" width="126" height="7" rx="3" fill="#d74e30"/>
+    <text x="43" y="271" class="small">Playback begins after the transfer finishes.</text>
+    <text x="43" y="303" class="small">Keep the phone connected to the Pi.</text>
+    <rect x="24" y="371" width="312" height="49" rx="12" fill="#fff" stroke="#dce3e9"/>
+    <text x="163" y="402" class="body strong">Cancel</text>
+    <text x="24" y="470" class="label">IF THE CONNECTION DROPS</text>
+    <text x="24" y="503" class="body">Keep the file on the phone.</text>
+    <text x="24" y="526" class="small">Show Retry after the upload is cleaned up.</text>
+  </g>
+
+  <g transform="translate(1237 88)">
+    <use href="#phone"/>
+    <text x="24" y="88" class="h">Media</text>
+    <text x="24" y="110" class="small">Pi connected · one drive missing</text>
+    <rect x="24" y="145" width="312" height="70" rx="14" fill="#eaf2f2"/>
+    <text x="43" y="177" class="body strong">Pi USB</text>
+    <text x="43" y="197" class="small">Connected · browse files</text>
+    <rect x="24" y="229" width="312" height="126" rx="14" fill="#fff" stroke="#dce3e9"/>
+    <text x="43" y="261" class="body strong">Elements is disconnected</text>
+    <text x="43" y="285" class="small">Connect the drive to the Pi to browse it.</text>
+    <text x="43" y="313" class="small">History remains visible while it is away.</text>
+    <text x="43" y="337" class="accent strong" font-size="13">Check again</text>
+    <text x="24" y="408" class="label">RECENT PLAYBACK</text>
+    <text x="24" y="444" class="body strong">An old film</text>
+    <text x="24" y="467" class="small">On Elements · unavailable until reconnected</text>
+    <text x="24" y="512" class="body strong">Nature clip.mp4</text>
+    <text x="24" y="535" class="small">On Pi USB · ready to play</text>
+  </g>
+
+  <g transform="translate(1638 88)">
+    <rect width="360" height="760" rx="28" fill="#181f27" stroke="#546171" stroke-width="2"/>
+    <text x="24" y="28" class="dim" font-size="12">9:41</text>
+    <text x="24" y="88" class="inverse h">Two players</text>
+    <text x="24" y="110" class="dim" font-size="12">Choose the output you want to control</text>
+    <rect x="24" y="145" width="312" height="150" rx="16" fill="#26333f"/>
+    <rect x="24" y="145" width="4" height="150" rx="2" fill="#ed7152"/>
+    <text x="43" y="177" class="dim" font-size="11">PI SCREEN · PLAYING</text>
+    <text x="43" y="203" class="inverse strong" font-size="16">Evening film</text>
+    <text x="43" y="224" class="dim" font-size="12">42:18 of 1:13:30 · volume 10%</text>
+    <text x="43" y="269" class="inverse strong" font-size="13">Pause</text>
+    <text x="279" y="269" class="inverse strong" font-size="13">Stop</text>
+    <rect x="24" y="312" width="312" height="150" rx="16" fill="#26333f"/>
+    <rect x="24" y="312" width="4" height="150" rx="2" fill="#66aeb0"/>
+    <text x="43" y="344" class="dim" font-size="11">PHONE HDMI · PAUSED</text>
+    <text x="43" y="370" class="inverse strong" font-size="16">Favorite track</text>
+    <text x="43" y="391" class="dim" font-size="12">3:18 of 5:02 · phone volume</text>
+    <text x="43" y="436" class="inverse strong" font-size="13">Resume</text>
+    <text x="279" y="436" class="inverse strong" font-size="13">Stop</text>
+    <text x="24" y="513" class="dim" font-size="12">Commands apply only to the named output.</text>
+    <rect x="12" y="619" width="336" height="67" rx="12" fill="#334350"/>
+    <text x="28" y="643" class="inverse strong" font-size="13">2 sessions active</text>
+    <text x="28" y="664" class="dim" font-size="11">Tap to choose Pi or phone</text>
+    <rect x="1" y="695" width="358" height="64" fill="#212b34"/>
+    <text x="26" y="734" class="dim" font-size="11">Home</text>
+    <text x="100" y="734" class="dim" font-size="11">Media</text>
+    <text x="180" y="734" class="dim" font-size="11">Share</text>
+    <text x="260" y="734" class="dim" font-size="11">Chat</text>
+    <text x="317" y="734" class="dim" font-size="11">More</text>
+  </g>
+</svg>
