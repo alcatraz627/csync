@@ -1,6 +1,6 @@
 # Android UI system proposal
 
-This is a design and implementation contract for the next csync Android UI pass. It is not an implemented component library. The [revised screen sheet](../assets/android-ui-direction-2.svg) and [state sheet](../assets/android-ui-direction-2-states.svg) show the intended hierarchy; the Android resource files remain the source for shipped colors and themes.
+This is a design and implementation contract for the csync Android UI pass. It is not a complete component library. The [revised screen sheet](../assets/android-ui-direction-2.svg) and [state sheet](../assets/android-ui-direction-2-states.svg) show the intended hierarchy. [Emulator captures](../assets/android-ui-live/) show the first Home, Media, More, and mini player implementation. The Android resource files remain the source for shipped colors and themes.
 
 ## Screen jobs and hierarchy
 
@@ -65,4 +65,4 @@ Share's composer and inbox, Chat's conversation list, and Tools' diagnostics use
 5. Exercise idle, buffering, playing, paused, failed command, offline Pi, disconnected drive, failed upload, and simultaneous Pi and phone playback. Capture screen images and test the action, not only the layout.
 6. Before merging any new component, name its two callers or its unique stateful reason. Compare sibling screens and remove duplicated one-off styling. Use Android color and dimension resources rather than copying SVG colors or raw pixels.
 
-The current mocks have only been visually inspected as static concepts. None of these runtime, accessibility, narrow-screen, theme, or failure-state checks is complete for a redesigned Android app.
+The Home, Media, More, and mini player layouts have been inspected in a running emulator. Pi file browsing and the mini player's Pause, Resume, and Stop were exercised against the live Pi. The remaining screens, accessibility, narrow-screen, theme, phone, and failure-state checks are still open.
