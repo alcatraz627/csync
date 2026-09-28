@@ -25,6 +25,13 @@ type gPart struct {
 	// A part marked Thought is the model's reasoning, surfaced separately from
 	// its answer when thinking output is requested.
 	Thought bool `json:"thought,omitempty"`
+	// An image or PDF the owner attached, sent to the model as raw bytes.
+	InlineData *gBlob `json:"inlineData,omitempty"`
+}
+
+type gBlob struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type gFunctionCall struct {

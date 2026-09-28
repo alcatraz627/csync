@@ -120,3 +120,59 @@ func TestCameraUsesSharedMediaService(t *testing.T) {
 		t.Fatalf("clip did not use camera service: %#v", result)
 	}
 }
+
+func TestNotesToolUsesMediaAuthorityAndRevision(t *testing.T) {
+	requests := 0
+	mediaFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Csync-Token") != "fixture-token" {
+			t.Error("note request missing mesh token")
+		}
+		requests++
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/notes":
+			json.NewEncoder(w).Encode(map[string]any{"notes": []any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/notes":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["title"] != "Trip" || body["body"] != "# List" {
+				t.Errorf("wrong create body: %#v", body)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "n1", "revision": 1})
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/notes/n1":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["expectedRevision"] != float64(1) {
+				t.Errorf("lost revision: %#v", body)
+			}
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{"code": "NOTE_CONFLICT"})
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/notes/n1":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["expectedRevision"] != float64(2) {
+				t.Errorf("lost delete revision: %#v", body)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"deleted": true})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	if result := executeTool("notes", map[string]any{"action": "list"}); result["notes"] == nil {
+		t.Fatalf("list failed: %#v", result)
+	}
+	if result := executeTool("notes", map[string]any{"action": "create", "title": "Trip", "body": "# List"}); result["id"] != "n1" {
+		t.Fatalf("create failed: %#v", result)
+	}
+	if result := executeTool("notes", map[string]any{"action": "update", "id": "n1", "title": "Trip", "body": "# List", "expected_revision": float64(1)}); result["code"] != "NOTE_CONFLICT" || result["ok"] != false {
+		t.Fatalf("conflict was lost: %#v", result)
+	}
+	if result := executeTool("notes", map[string]any{"action": "delete", "id": "n1", "expected_revision": float64(2)}); result["deleted"] != true {
+		t.Fatalf("delete failed: %#v", result)
+	}
+	if result := executeTool("notes", map[string]any{"action": "delete", "id": "n1", "expected_revision": float64(1.5)}); result["code"] != "NOTE_INVALID" {
+		t.Fatalf("fractional revision accepted: %#v", result)
+	}
+	if requests != 4 {
+		t.Fatalf("unexpected network requests: %d", requests)
+	}
+}

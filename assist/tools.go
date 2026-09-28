@@ -179,13 +179,23 @@ func toolDeclarations() []gTool {
 			Name: "media_diagnose", Description: "Check media service, drives, Pi power, and HDMI observations even if the media service is down.",
 			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{}},
 		},
+		{
+			Name: "notes", Description: "List, read, create, update, or delete a Pi note. Changes require the current note revision so another editor is not overwritten.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
+				"action":            {Type: "string", Description: "list, read, create, update, or delete"},
+				"id":                {Type: "string", Description: "note ID for read, update, or delete"},
+				"title":             {Type: "string", Description: "note title for create or update"},
+				"body":              {Type: "string", Description: "Markdown source for create or update"},
+				"expected_revision": {Type: "integer", Description: "revision returned by read or list, required for update or delete"},
+			}, Required: []string{"action"}},
+		},
 	}}}
 }
 
 // executeTool runs one tool and returns a response map. It never throws; a
 // failure comes back as {"error": ...} so the model can react.
 func executeTool(name string, args map[string]any) map[string]any {
-	if name == "media_cast_youtube" {
+	if name == "media_cast_youtube" || name == "notes" {
 		log.Printf("tool %s", name)
 	} else {
 		log.Printf("tool %s args=%v", name, args)
@@ -235,6 +245,8 @@ func executeTool(name string, args map[string]any) map[string]any {
 		return mediaCommand(str(args["target"]), "speed", "", args["value"])
 	case "media_diagnose":
 		return mediaDiagnose()
+	case "notes":
+		return notesTool(args)
 	default:
 		return map[string]any{"error": "unknown tool " + name}
 	}

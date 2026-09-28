@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -58,6 +59,57 @@ func mediaRequest(method, path string, body map[string]any, timeout ...time.Dura
 }
 
 func mediaGet(path string) map[string]any { return mediaRequest(http.MethodGet, path, nil) }
+
+func notesTool(args map[string]any) map[string]any {
+	action := str(args["action"])
+	if action == "list" {
+		return mediaGet("/v1/notes")
+	}
+	id := str(args["id"])
+	if action == "create" || action == "update" {
+		title, titleOK := args["title"].(string)
+		body, bodyOK := args["body"].(string)
+		if !titleOK || !bodyOK || strings.TrimSpace(title) == "" {
+			return map[string]any{"code": "NOTE_INVALID", "error": "title and Markdown body are required"}
+		}
+		request := map[string]any{"title": title, "body": body}
+		if action == "create" {
+			return mediaRequest(http.MethodPost, "/v1/notes", request)
+		}
+		if id == "" {
+			return map[string]any{"code": "NOTE_INVALID", "error": "note ID is required"}
+		}
+		revision, ok := notesRevision(args["expected_revision"])
+		if !ok {
+			return map[string]any{"code": "NOTE_INVALID", "error": "current note revision is required"}
+		}
+		request["expectedRevision"] = revision
+		return mediaRequest(http.MethodPut, "/v1/notes/"+url.PathEscape(id), request)
+	}
+	if id == "" {
+		return map[string]any{"code": "NOTE_INVALID", "error": "note ID is required"}
+	}
+	path := "/v1/notes/" + url.PathEscape(id)
+	if action == "read" {
+		return mediaGet(path)
+	}
+	if action == "delete" {
+		revision, ok := notesRevision(args["expected_revision"])
+		if !ok {
+			return map[string]any{"code": "NOTE_INVALID", "error": "current note revision is required"}
+		}
+		return mediaRequest(http.MethodDelete, path, map[string]any{"expectedRevision": revision})
+	}
+	return map[string]any{"code": "NOTE_INVALID", "error": "unknown note action"}
+}
+
+func notesRevision(value any) (int, bool) {
+	number, ok := value.(float64)
+	if !ok || number < 1 || number > 1e9 || number != math.Trunc(number) {
+		return 0, false
+	}
+	return int(number), true
+}
 
 func mediaSearch(query string) map[string]any {
 	if strings.TrimSpace(query) == "" {

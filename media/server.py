@@ -73,7 +73,8 @@ class State:
         self.phone: dict = {}
         self.commands: dict[str, dict] = {}
         self.pi = {"target": "pi", "state": "idle", "itemId": None, "positionMs": 0,
-                   "durationMs": None, "volume": 20, "speed": 1.0, "revision": 0}
+                   "durationMs": None, "volume": 20, "speed": 1.0,
+                   "rotation": 0, "loop": False, "revision": 0}
         self.pi_session = ""
         self.pi_generation = 0
         self.pi_sequence = 0
@@ -90,9 +91,206 @@ class State:
                 db.execute("ALTER TABLE progress ADD COLUMN name TEXT")
             if "drive_label" not in columns:
                 db.execute("ALTER TABLE progress ADD COLUMN drive_label TEXT")
+            db.execute("""CREATE TABLE IF NOT EXISTS notes (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
+                revision INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS note_images (
+                id TEXT PRIMARY KEY, note_id TEXT NOT NULL, data BLOB NOT NULL,
+                created_at INTEGER NOT NULL)""")
+            db.execute("CREATE INDEX IF NOT EXISTS note_images_note ON note_images(note_id, created_at)")
+            db.execute("""CREATE TABLE IF NOT EXISTS pins (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, url TEXT NOT NULL,
+                description TEXT NOT NULL, revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""")
+            pin_columns = {row[1] for row in db.execute("PRAGMA table_info(pins)")}
+            if "content" not in pin_columns:
+                db.execute("ALTER TABLE pins ADD COLUMN content TEXT NOT NULL DEFAULT ''")
+            if "tags" not in pin_columns:
+                db.execute("ALTER TABLE pins ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
 
     def _db(self):
         return sqlite3.connect(self.database, timeout=5)
+
+    @staticmethod
+    def _note_fields(body: dict) -> tuple[str, str]:
+        title, content = body.get("title"), body.get("body")
+        if not isinstance(title, str) or not isinstance(content, str) or not title.strip() or \
+                len(title) > 200 or len(content.encode("utf-8")) > 256 * 1024:
+            raise MediaError("NOTE_INVALID", "Add a title and up to 256 KB of Markdown")
+        return title.strip(), content
+
+    @staticmethod
+    def _note_revision(body: dict) -> int:
+        value = body.get("expectedRevision")
+        if type(value) is not int or value < 1:
+            raise MediaError("NOTE_INVALID", "Send the note revision before changing it")
+        return value
+
+    @staticmethod
+    def _note_row(row: tuple) -> dict:
+        return {"id": row[0], "title": row[1], "body": row[2], "revision": row[3],
+                "createdAt": row[4], "updatedAt": row[5]}
+
+    def notes_list(self, query: str = "") -> list[dict]:
+        if len(query) > 128:
+            raise MediaError("NOTE_INVALID", "Search notes with up to 128 characters")
+        with self._db() as db:
+            if query:
+                rows = db.execute(
+                    "SELECT id,title,body,revision,created_at,updated_at FROM notes "
+                    "WHERE instr(lower(title),lower(?))>0 OR instr(lower(body),lower(?))>0 "
+                    "ORDER BY updated_at DESC,id LIMIT 500", (query, query)).fetchall()
+            else:
+                rows = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes ORDER BY updated_at DESC,id LIMIT 500").fetchall()
+        return [{key: value for key, value in self._note_row(row).items() if key != "body"}
+                for row in rows]
+
+    def note_get(self, note_id: str) -> dict:
+        with self._db() as db:
+            row = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes WHERE id=?", (note_id,)).fetchone()
+        if row is None:
+            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        return self._note_row(row)
+
+    def note_create(self, body: dict) -> dict:
+        title, content = self._note_fields(body)
+        note_id, now = str(uuid.uuid4()), int(time.time())
+        with self._db() as db:
+            db.execute("INSERT INTO notes VALUES(?,?,?,?,?,?)", (note_id, title, content, 1, now, now))
+        return self.note_get(note_id)
+
+    def note_update(self, note_id: str, body: dict) -> dict:
+        title, content = self._note_fields(body)
+        revision = self._note_revision(body)
+        with self._db() as db:
+            changed = db.execute("UPDATE notes SET title=?,body=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?",
+                                 (title, content, int(time.time()), note_id, revision)).rowcount
+        if not changed:
+            self.note_get(note_id)
+            raise MediaError("NOTE_CONFLICT", "This note changed elsewhere. Reload it before saving", 409)
+        return self.note_get(note_id)
+
+    def note_delete(self, note_id: str, body: dict) -> dict:
+        revision = self._note_revision(body)
+        with self._db() as db:
+            changed = db.execute("DELETE FROM notes WHERE id=? AND revision=?", (note_id, revision)).rowcount
+            if changed:
+                db.execute("DELETE FROM note_images WHERE note_id=?", (note_id,))
+        if not changed:
+            self.note_get(note_id)
+            raise MediaError("NOTE_CONFLICT", "This note changed elsewhere. Reload it before deleting", 409)
+        return {"deleted": True, "id": note_id}
+
+    @staticmethod
+    def _pin_fields(body: dict) -> tuple[str, str, str, str, list[str]]:
+        title = body.get("title", "")
+        url = body.get("url", "")
+        description = body.get("description", "")
+        content = body.get("content", "")
+        tags = body.get("tags", [])
+        if not isinstance(title, str) or len(title) > 200 or \
+                not isinstance(url, str) or len(url) > 2048 or \
+                not isinstance(description, str) or len(description) > 4096 or \
+                not isinstance(content, str) or len(content.encode("utf-8")) > 16 * 1024 or \
+                not isinstance(tags, list) or len(tags) > 12 or \
+                any(not isinstance(tag, str) or not tag.strip() or len(tag) > 32 for tag in tags):
+            raise MediaError("PIN_INVALID", "Use a URL or text snippet with optional title, tags, and description")
+        url = url.strip()
+        content = content.strip()
+        if not url and not content:
+            raise MediaError("PIN_INVALID", "Add a URL or text snippet")
+        if url:
+            try:
+                parsed = urlsplit(url)
+                valid = parsed.scheme in ("http", "https") and parsed.hostname and \
+                    not parsed.username and not parsed.password and not any(char.isspace() for char in url)
+                if not valid or parsed.port == 0:
+                    raise ValueError("invalid URL")
+            except ValueError:
+                raise MediaError("PIN_INVALID", "Use a full http or https URL")
+        return title.strip(), url, description.strip(), content, [tag.strip() for tag in tags]
+
+    @staticmethod
+    def _pin_revision(body: dict) -> int:
+        revision = body.get("expectedRevision")
+        if type(revision) is not int or revision < 1:
+            raise MediaError("PIN_INVALID", "Send the pin revision before changing it")
+        return revision
+
+    @staticmethod
+    def _pin_row(row: tuple) -> dict:
+        return {"id": row[0], "title": row[1], "url": row[2], "description": row[3],
+                "revision": row[4], "createdAt": row[5], "updatedAt": row[6],
+                "content": row[7], "tags": json.loads(row[8])}
+
+    def pins_list(self) -> list[dict]:
+        with self._db() as db:
+            rows = db.execute("SELECT id,title,url,description,revision,created_at,updated_at,content,tags "
+                              "FROM pins ORDER BY updated_at DESC,id LIMIT 500").fetchall()
+        return [self._pin_row(row) for row in rows]
+
+    def pin_get(self, pin_id: str) -> dict:
+        with self._db() as db:
+            row = db.execute("SELECT id,title,url,description,revision,created_at,updated_at,content,tags "
+                             "FROM pins WHERE id=?", (pin_id,)).fetchone()
+        if row is None:
+            raise MediaError("PIN_NOT_FOUND", "This pin is no longer available", 404)
+        return self._pin_row(row)
+
+    def pin_create(self, body: dict) -> dict:
+        title, url, description, content, tags = self._pin_fields(body)
+        pin_id, now = str(uuid.uuid4()), int(time.time())
+        with self._db() as db:
+            db.execute("INSERT INTO pins(id,title,url,description,revision,created_at,updated_at,content,tags) "
+                       "VALUES(?,?,?,?,?,?,?,?,?)",
+                       (pin_id, title, url, description, 1, now, now, content, json.dumps(tags)))
+        return self.pin_get(pin_id)
+
+    def pin_update(self, pin_id: str, body: dict) -> dict:
+        title, url, description, content, tags = self._pin_fields(body)
+        revision = self._pin_revision(body)
+        with self._db() as db:
+            changed = db.execute("UPDATE pins SET title=?,url=?,description=?,content=?,tags=?,"
+                                 "revision=revision+1,updated_at=? WHERE id=? AND revision=?",
+                                 (title, url, description, content, json.dumps(tags), int(time.time()),
+                                  pin_id, revision)).rowcount
+        if not changed:
+            self.pin_get(pin_id)
+            raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before saving", 409)
+        return self.pin_get(pin_id)
+
+    def pin_delete(self, pin_id: str, body: dict) -> dict:
+        revision = self._pin_revision(body)
+        with self._db() as db:
+            changed = db.execute("DELETE FROM pins WHERE id=? AND revision=?", (pin_id, revision)).rowcount
+        if not changed:
+            self.pin_get(pin_id)
+            raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
+        return {"deleted": True, "id": pin_id}
+
+    def note_images(self, note_id: str) -> list[dict]:
+        self.note_get(note_id)
+        with self._db() as db:
+            rows = db.execute("SELECT id,length(data),created_at FROM note_images WHERE note_id=? ORDER BY created_at,id",
+                              (note_id,)).fetchall()
+        return [{"id": row[0], "bytes": row[1], "createdAt": row[2]} for row in rows]
+
+    def note_image_add(self, note_id: str, data: bytes) -> dict:
+        if not 8 <= len(data) <= 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise MediaError("IMAGE_INVALID", "Choose a PNG image under 1 MB")
+        self.note_get(note_id)
+        image_id, now = str(uuid.uuid4()), int(time.time())
+        with self._db() as db:
+            db.execute("INSERT INTO note_images VALUES(?,?,?,?)", (image_id, note_id, data, now))
+        return {"id": image_id, "bytes": len(data), "createdAt": now}
+
+    def note_image_get(self, note_id: str, image_id: str) -> bytes:
+        self.note_get(note_id)
+        with self._db() as db:
+            row = db.execute("SELECT data FROM note_images WHERE note_id=? AND id=?", (note_id, image_id)).fetchone()
+        if row is None:
+            raise MediaError("IMAGE_NOT_FOUND", "This note image is unavailable", 404)
+        return row[0]
 
     def history(self) -> list[dict]:
         with self._db() as db:
@@ -203,6 +401,8 @@ class State:
         if not self.wallpaper.is_file():
             return False
         self._start_player()
+        self._mpv(["set_property", "video-rotate", 0])
+        self._mpv(["set_property", "loop-file", "no"])
         self._mpv(["loadfile", str(self.wallpaper), "replace"])
         return True
 
@@ -233,7 +433,8 @@ class State:
                     self._save_pi_progress(observed, observed["state"] == "finished")
                 except MediaError:
                     pass
-            self.pi.update(itemId=None, state="idle", positionMs=0)
+            self.pi.update(itemId=None, state="idle", positionMs=0,
+                           rotation=0, loop=False)
             self.pi.pop("error", None)
             self.pi.pop("sourcePath", None)
             self.pi["revision"] += 1
@@ -262,6 +463,7 @@ class State:
                 source_path = self.pi.get("sourcePath")
                 if source_path and self._mpv(["get_property", "path"]).get("data") != source_path:
                     self.pi.update(itemId=None, state="unavailable", positionMs=0,
+                                   rotation=0, loop=False,
                                    error="Pi player changed output outside this media session")
                     self.pi.pop("sourcePath", None)
                     self.pi_generation = time.time_ns()
@@ -321,7 +523,8 @@ class State:
                         self.show_wallpaper()
                     except MediaError:
                         pass
-                    self.pi.update(itemId=None, state="idle", positionMs=0)
+                    self.pi.update(itemId=None, state="idle", positionMs=0,
+                                   rotation=0, loop=False)
                     self.pi.pop("sourcePath", None)
                     self.pi["revision"] += 1
                     return
@@ -345,7 +548,11 @@ class State:
                 self._start_player()
                 self._mpv(["set_property", "volume", 0])
                 self._mpv(["set_property", "pause", False])
+                self._mpv(["set_property", "video-rotate", 0])
+                self._mpv(["set_property", "loop-file", "no"])
                 self.pi["volume"] = 0
+                self.pi["rotation"] = 0
+                self.pi["loop"] = False
                 self._mpv(["loadfile", path, "replace"])
                 self.pi.update(itemId=item_id, state="loading", positionMs=0,
                                durationMs=None, name=name, sourcePath=path)
@@ -391,6 +598,7 @@ class State:
                             pass
                         self.pi_generation = time.time_ns()
                         self.pi.update(itemId=None, state="unavailable", positionMs=0,
+                                       rotation=0, loop=False,
                                        error="Player did not open the selected media")
                         self.pi.pop("sourcePath", None)
                         self.pi["revision"] += 1
@@ -416,7 +624,8 @@ class State:
                     self.show_wallpaper()
                 except MediaError:
                     pass
-                self.pi.update(itemId=None, state="idle", positionMs=0)
+                self.pi.update(itemId=None, state="idle", positionMs=0,
+                               rotation=0, loop=False)
                 self.pi.pop("error", None)
                 self.pi.pop("sourcePath", None)
             elif action == "seek":
@@ -430,6 +639,18 @@ class State:
                     raise MediaError("COMMAND_INVALID", "Choose a valid setting")
                 self._mpv(["set_property", action, value])
                 self.pi[action] = value
+            elif action == "rotate":
+                value = body.get("value")
+                if type(value) is not int or value not in (0, 90, 180, 270):
+                    raise MediaError("COMMAND_INVALID", "Choose 0, 90, 180, or 270 degrees")
+                self._mpv(["set_property", "video-rotate", value])
+                self.pi["rotation"] = value
+            elif action == "loop":
+                value = body.get("value")
+                if type(value) is not bool:
+                    raise MediaError("COMMAND_INVALID", "Choose whether to loop the file")
+                self._mpv(["set_property", "loop-file", "inf" if value else "no"])
+                self.pi["loop"] = value
             else:
                 raise MediaError("COMMAND_INVALID", "Unsupported player command")
             self.pi["revision"] += 1
@@ -453,7 +674,8 @@ class State:
                     self.show_wallpaper()
                 except MediaError:
                     pass
-                self.pi.update(itemId=None, state="idle", positionMs=0)
+                self.pi.update(itemId=None, state="idle", positionMs=0,
+                               rotation=0, loop=False)
                 self.pi.pop("error", None)
                 self.pi.pop("sourcePath", None)
             elif action == "pause":
@@ -674,6 +896,16 @@ def handler_for(state: State, token: str):
                     while chunk := source.read(65536):
                         self.wfile.write(chunk)
 
+        def _note_image(self, note_id: str, image_id: str):
+            data = state.note_image_get(note_id, image_id)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
         def _bootstrap(self, provided: str) -> bool:
             marker = state.database.parent / "app-bootstrap-token"
             try:
@@ -685,10 +917,10 @@ def handler_for(state: State, token: str):
                 return False
             return len(expected) >= 32 and secrets.compare_digest(expected, provided)
 
-        def _body(self) -> dict:
+        def _body(self, max_length: int = 16384) -> dict:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 16384:
+                if not 0 < length <= max_length:
                     raise ValueError()
                 value = json.loads(self.rfile.read(length))
                 if not isinstance(value, dict):
@@ -704,6 +936,12 @@ def handler_for(state: State, token: str):
             self._dispatch()
 
         def do_POST(self):
+            self._dispatch()
+
+        def do_PUT(self):
+            self._dispatch()
+
+        def do_DELETE(self):
             self._dispatch()
 
         def _dispatch(self):
@@ -729,6 +967,7 @@ def handler_for(state: State, token: str):
         def _route(self):
             parsed = urlsplit(self.path)
             path = parsed.path
+            parts = path.split("/")
             query = parse_qs(parsed.query)
             def number(name: str, default: int) -> int:
                 try:
@@ -751,6 +990,18 @@ def handler_for(state: State, token: str):
                     return self._stream(path[len("/v1/items/"):-len("/stream")])
                 if path == "/v1/history":
                     return self._json(200, {"entries": state.history()})
+                if path == "/v1/notes":
+                    return self._json(200, {"notes": state.notes_list(query.get("q", [""])[0])})
+                if path == "/v1/pins":
+                    return self._json(200, {"pins": state.pins_list()})
+                if path.startswith("/v1/pins/"):
+                    return self._json(200, {"pin": state.pin_get(path.removeprefix("/v1/pins/"))})
+                if len(parts) == 6 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
+                    return self._note_image(parts[3], parts[5])
+                if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
+                    return self._json(200, {"images": state.note_images(parts[3])})
+                if path.startswith("/v1/notes/"):
+                    return self._json(200, {"note": state.note_get(path.removeprefix("/v1/notes/"))})
                 if path == "/v1/player/pi":
                     return self._json(200, state.pi_state())
                 if path == "/v1/player/phone":
@@ -773,6 +1024,18 @@ def handler_for(state: State, token: str):
                 if path.startswith("/v1/camera/captures/") and state.camera:
                     return self._capture(path.rsplit("/", 1)[-1])
             elif self.command == "POST":
+                if path == "/v1/notes":
+                    return self._json(201, {"note": state.note_create(self._body(320 * 1024))})
+                if path == "/v1/pins":
+                    return self._json(201, {"pin": state.pin_create(self._body(8 * 1024))})
+                if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError:
+                        length = 0
+                    if not 8 <= length <= 1024 * 1024:
+                        raise MediaError("IMAGE_INVALID", "Choose a PNG image under 1 MB")
+                    return self._json(201, {"image": state.note_image_add(parts[3], self.rfile.read(length))})
                 if path == "/v1/cast/file":
                     try:
                         length = int(self.headers.get("Content-Length", "0"))
@@ -815,6 +1078,18 @@ def handler_for(state: State, token: str):
                     return self._json(200, state.camera.stop_recording())
                 if path == "/v1/camera/record/clip" and state.camera:
                     return self._json(200, state.camera.record_clip(body.get("durationSeconds", 5)))
+            elif self.command in ("PUT", "DELETE") and path.startswith("/v1/pins/"):
+                pin_id = path.removeprefix("/v1/pins/")
+                body = self._body(8 * 1024)
+                if self.command == "PUT":
+                    return self._json(200, {"pin": state.pin_update(pin_id, body)})
+                return self._json(200, state.pin_delete(pin_id, body))
+            elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
+                note_id = path.removeprefix("/v1/notes/")
+                body = self._body(320 * 1024)
+                if self.command == "PUT":
+                    return self._json(200, {"note": state.note_update(note_id, body)})
+                return self._json(200, state.note_delete(note_id, body))
             raise MediaError("ROUTE_UNKNOWN", "This media operation is unavailable", 404)
 
         def _camera_stream(self):

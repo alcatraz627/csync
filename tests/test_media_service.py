@@ -3,6 +3,7 @@ import json
 import os
 import io
 import queue
+import sqlite3
 import socket
 import time
 import tempfile
@@ -154,6 +155,133 @@ class MediaServiceTest(unittest.TestCase):
         status, data, _ = self.request("GET", route)
         self.assertEqual((status, json.loads(data)["code"]), (503, "UPDATE_UNAVAILABLE"))
 
+    def test_notes_crud_requires_token_and_revision(self):
+        route = "/v1/notes"
+        status, data, _ = self.request("POST", route, {"title": "Test", "body": "# Hello"},
+                                        headers={"X-Csync-Token": "wrong"})
+        self.assertEqual((status, json.loads(data)["code"]), (401, "AUTH_REQUIRED"))
+        status, data, _ = self.request("POST", route, {"title": "Test", "body": "# Hello"})
+        self.assertEqual(status, 201)
+        note = json.loads(data)["note"]
+        self.assertEqual((note["revision"], note["body"]), (1, "# Hello"))
+        item = route + "/" + note["id"]
+        status, data, _ = self.request("GET", route)
+        self.assertEqual((status, json.loads(data)["notes"][0]["id"]), (200, note["id"]))
+        status, data, _ = self.request("PUT", item,
+                                        {"title": "Test 2", "body": "| A | B |", "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["note"]["revision"]), (200, 2))
+        status, data, _ = self.request("PUT", item,
+                                        {"title": "Stale", "body": "lost", "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["code"]), (409, "NOTE_CONFLICT"))
+        status, data, _ = self.request("GET", item)
+        self.assertEqual((status, json.loads(data)["note"]["title"]), (200, "Test 2"))
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["code"]), (409, "NOTE_CONFLICT"))
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 2})
+        self.assertEqual((status, json.loads(data)["deleted"]), (200, True))
+        status, data, _ = self.request("GET", item)
+        self.assertEqual((status, json.loads(data)["code"]), (404, "NOTE_NOT_FOUND"))
+
+    def test_notes_search_body_beyond_default_list_window(self):
+        with self.state._db() as db:
+            db.execute("INSERT INTO notes VALUES(?,?,?,?,?,?)",
+                       ("older", "Unrelated title", "Needle in Markdown", 1, 1, 1))
+            db.executemany("INSERT INTO notes VALUES(?,?,?,?,?,?)",
+                           ((f"new-{i}", "Recent", "ordinary", 1, 2, i + 2)
+                            for i in range(501)))
+        status, data, _ = self.request("GET", "/v1/notes")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(data)["notes"]), 500)
+        self.assertNotIn("older", [item["id"] for item in json.loads(data)["notes"]])
+        status, data, _ = self.request("GET", "/v1/notes?q=needle")
+        self.assertEqual((status, [item["id"] for item in json.loads(data)["notes"]]),
+                         (200, ["older"]))
+        self.assertNotIn("body", json.loads(data)["notes"][0])
+        status, data, _ = self.request("GET", "/v1/notes?q=" + "x" * 129)
+        self.assertEqual((status, json.loads(data)["code"]), (400, "NOTE_INVALID"))
+
+    def test_pins_store_urls_with_auth_and_revision_conflicts(self):
+        route = "/v1/pins"
+        body = {"title": "Example", "url": "https://example.org/article", "description": "Read later"}
+        status, data, _ = self.request("POST", route, body, headers={"X-Csync-Token": "wrong"})
+        self.assertEqual((status, json.loads(data)["code"]), (401, "AUTH_REQUIRED"))
+        for url in ("javascript:alert(1)", "https://user:pass@example.org", "https://[bad"):
+            status, data, _ = self.request("POST", route, {**body, "url": url})
+            self.assertEqual((status, json.loads(data)["code"]), (400, "PIN_INVALID"))
+        status, data, _ = self.request("POST", route, body)
+        self.assertEqual(status, 201)
+        pin = json.loads(data)["pin"]
+        self.assertEqual((pin["revision"], pin["url"]), (1, body["url"]))
+        item = route + "/" + pin["id"]
+        status, data, _ = self.request("GET", route)
+        self.assertEqual((status, json.loads(data)["pins"][0]["id"]), (200, pin["id"]))
+        status, data, _ = self.request("PUT", item, {**body, "title": "Changed", "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["pin"]["revision"]), (200, 2))
+        status, data, _ = self.request("PUT", item, {**body, "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["code"]), (409, "PIN_CONFLICT"))
+        status, data, _ = self.request("GET", item)
+        self.assertEqual((status, json.loads(data)["pin"]["title"]), (200, "Changed"))
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["code"]), (409, "PIN_CONFLICT"))
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 2})
+        self.assertEqual((status, json.loads(data)["deleted"]), (200, True))
+        status, data, _ = self.request("GET", item)
+        self.assertEqual((status, json.loads(data)["code"]), (404, "PIN_NOT_FOUND"))
+
+    def test_pin_snippets_tags_and_optional_title(self):
+        route = "/v1/pins"
+        snippet = {"content": "A useful text snippet", "tags": ["Read later", "Pi"]}
+        status, data, _ = self.request("POST", route, snippet)
+        self.assertEqual(status, 201)
+        pin = json.loads(data)["pin"]
+        self.assertEqual((pin["title"], pin["url"], pin["content"], pin["tags"]),
+                         ("", "", snippet["content"], snippet["tags"]))
+        item = route + "/" + pin["id"]
+        status, data, _ = self.request("PUT", item, {"url": "https://example.org", "tags": ["Link"],
+                                                      "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["pin"]["revision"]), (200, 2))
+        for invalid in ({}, {"content": "text", "tags": [""]},
+                        {"content": "text", "tags": ["x"] * 13},
+                        {"content": "text", "url": "javascript:bad"}):
+            status, data, _ = self.request("POST", route, invalid)
+            self.assertEqual((status, json.loads(data)["code"]), (400, "PIN_INVALID"))
+
+    def test_existing_url_pins_gain_snippet_columns_without_losing_data(self):
+        old_db = Path(self.tmp.name) / "old-pins.db"
+        with sqlite3.connect(old_db) as db:
+            db.execute("""CREATE TABLE pins (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, url TEXT NOT NULL,
+                description TEXT NOT NULL, revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""")
+            db.execute("INSERT INTO pins VALUES(?,?,?,?,?,?,?)",
+                       ("old", "Old link", "https://example.org", "Kept", 3, 1, 2))
+        migrated = State(self.state.library, old_db)
+        pin = migrated.pin_get("old")
+        self.assertEqual((pin["title"], pin["revision"], pin["content"], pin["tags"]),
+                         ("Old link", 3, "", []))
+
+    def test_note_png_attachment_is_authenticated_and_deleted_with_note(self):
+        note = self.state.note_create({"title": "Screenshots", "body": "Evidence"})
+        route = "/v1/notes/" + note["id"] + "/images"
+        png = b"\x89PNG\r\n\x1a\n" + b"fixture-image"
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        conn.request("POST", route, png, {"X-Csync-Token": "secret", "Content-Type": "image/png"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 201)
+        image_id = json.loads(response.read())["image"]["id"]
+        conn.close()
+        status, data, _ = self.request("GET", route)
+        self.assertEqual((status, json.loads(data)["images"][0]["id"]), (200, image_id))
+        status, data, headers = self.request("GET", route + "/" + image_id)
+        self.assertEqual((status, data, headers["Content-Type"]), (200, png, "image/png"))
+        status, data, _ = self.request("GET", route + "/" + image_id,
+                                        headers={"X-Csync-Token": "wrong"})
+        self.assertEqual((status, json.loads(data)["code"]), (401, "AUTH_REQUIRED"))
+        status, data, _ = self.request("DELETE", "/v1/notes/" + note["id"], {"expectedRevision": 1})
+        self.assertEqual(status, 200)
+        with self.state._db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM note_images WHERE note_id=?", (note["id"],)).fetchone()[0], 0)
+
     def test_bootstrap_link_is_secret_scoped_and_expires(self):
         marker = Path(self.tmp.name) / "app-bootstrap-token"
         marker.write_text("s" * 40)
@@ -295,6 +423,7 @@ class MediaServiceTest(unittest.TestCase):
         camera.process = Process()
         camera.record_file = FullFile()
         camera.record_path = camera.captures / "failed.mjpeg"
+        camera.record_started = time.monotonic()
         camera._read()
         self.assertFalse(camera.status()["recording"])
         self.assertIn("No space", camera.status()["recordingError"])
@@ -454,6 +583,29 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual((status, json.loads(data)["player"]["state"]), (200, "idle"))
             mpv.assert_called_with(["stop"])
             self.assertEqual(self.state.pi["revision"], 3)
+
+    def test_pi_rotate_and_loop_validate_and_reset_for_wallpaper(self):
+        with patch.object(self.state, "_mpv", return_value={"error": "success"}) as mpv:
+            for action, value, expected in (("rotate", 90, ["set_property", "video-rotate", 90]),
+                                            ("loop", True, ["set_property", "loop-file", "inf"])):
+                status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                               {"action": action, "value": value,
+                                                "expectedRevision": self.state.pi["revision"]})
+                self.assertEqual((status, json.loads(data)["status"]), (200, "applied"))
+                mpv.assert_any_call(expected)
+            self.assertEqual((self.state.pi["rotation"], self.state.pi["loop"]), (90, True))
+            for action, value in (("rotate", 45), ("rotate", True), ("loop", "true")):
+                revision = self.state.pi["revision"]
+                status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                               {"action": action, "value": value,
+                                                "expectedRevision": revision})
+                self.assertEqual((status, json.loads(data)["code"]), (400, "COMMAND_INVALID"))
+                self.assertEqual(self.state.pi["revision"], revision)
+            self.state.wallpaper.write_bytes(b"image")
+            with patch.object(self.state, "_start_player"):
+                self.assertTrue(self.state.show_wallpaper())
+            mpv.assert_any_call(["set_property", "video-rotate", 0])
+            mpv.assert_any_call(["set_property", "loop-file", "no"])
 
     def test_wallpaper_upload_is_bounded_and_stop_returns_to_it(self):
         image = b"\xff\xd8\xff" + b"x" * 120

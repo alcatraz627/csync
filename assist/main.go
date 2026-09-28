@@ -93,7 +93,11 @@ func serve() error {
 		if !authed(w, r, token) {
 			return
 		}
-		writeJSON(w, map[string]any{"providers": loadProviders(), "active": loadAssistConfig()})
+		providers := loadProviders()
+		for i := range providers {
+			providers[i].ChatSupported = chatProviderSupported(providers[i].ID)
+		}
+		writeJSON(w, map[string]any{"providers": providers, "active": loadAssistConfig()})
 	})
 	mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
@@ -102,6 +106,10 @@ func serve() error {
 		var c assistConfig
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 			http.Error(w, "need JSON {provider, model, effort}", http.StatusBadRequest)
+			return
+		}
+		if !chatProviderSupported(c.Provider) {
+			http.Error(w, c.Provider+" provider is not available for chat", http.StatusBadRequest)
 			return
 		}
 		if err := saveAssistConfig(c); err != nil {
@@ -135,9 +143,16 @@ func serve() error {
 			Message string `json:"message"`
 			Model   string `json:"model"`
 			Effort  string `json:"effort"`
+			// Files picked from the phone's + drawer, sent with this turn.
+			Attachments []attachment `json:"attachments"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Message == "" && len(req.Attachments) == 0) {
 			http.Error(w, "need JSON {session, message}", http.StatusBadRequest)
+			return
+		}
+		parts, err := userParts(req.Message, req.Attachments, mediaDir())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if req.Session == "" {
@@ -151,7 +166,7 @@ func serve() error {
 		if req.Effort != "" {
 			cfg.Effort = req.Effort
 		}
-		if cfg.Provider != "gemini" {
+		if !chatProviderSupported(cfg.Provider) {
 			http.Error(w, cfg.Provider+" provider is selected but not yet wired; choose Gemini in Settings", http.StatusNotImplemented)
 			return
 		}
@@ -160,7 +175,7 @@ func serve() error {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		history := sessions.append(req.Session, gContent{Role: "user", Parts: []gPart{{Text: req.Message}}})
+		history := sessions.append(req.Session, gContent{Role: "user", Parts: parts})
 
 		// Streaming mode (?stream=1): send each turn as newline-delimited JSON,
 		// flushed the moment it happens, so the app shows tool calls and results

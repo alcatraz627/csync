@@ -13,12 +13,15 @@ import (
 // UI can drill provider -> model -> effort. A new provider is added by dropping
 // a providers.json next to the config, not by changing code.
 type providerInfo struct {
-	ID      string   `json:"id"`
-	Label   string   `json:"label"`
-	Models  []string `json:"models"`
-	Efforts []string `json:"efforts"`
-	KeyFile string   `json:"keyFile"`
+	ID            string   `json:"id"`
+	Label         string   `json:"label"`
+	Models        []string `json:"models"`
+	Efforts       []string `json:"efforts"`
+	KeyFile       string   `json:"keyFile"`
+	ChatSupported bool     `json:"chatSupported"`
 }
+
+func chatProviderSupported(id string) bool { return id == "gemini" }
 
 // assistConfig is the owner's current selection.
 type assistConfig struct {
