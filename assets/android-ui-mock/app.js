@@ -6,14 +6,14 @@ const clone = value => JSON.parse(JSON.stringify(value));
 function freshState() {
   return {
     place: 'home', sheet: null, panel: null, toast: '', shade: false, full: false,
-    view: { media: 'Files', chat: 'All', search: 'All', notes: 'Notes', note: 'Preview', incoming: 'YouTube' },
+    view: { media: 'Files', chat: 'All', search: 'All', notes: 'Notes', note: 'Preview', incoming: 'Video' },
     theme: 'dark', size: 'sm', accent: 'coral', custom: '',
     pi: 'online', power: 'ok', drive: 'ok', sendFails: false, shizuku: false, update: true, camera: 'live',
     folded: {}, source: 'Pi USB', folder: '', mediaSearch: false, mediaQuery: '', searchQuery: '',
     sessions: { 'Pi screen': null, 'This phone': null },
     defaults: { skip: 10, startVolume: 0, resume: true, loop: 'Off' },
     recipient: 'studio-mac', shareText: '', attachment: null, failed: '', sent: clone(SENT), received: clone(RECEIVED),
-    clip: { sub: 'Text, 46 characters', body: 'HDMI 2 is the Pi. HDMI 1 is the laptop dock.' },
+    clip: { kind: 'Text', sub: 'Text, 46 characters', body: 'HDMI 2 is the Pi. HDMI 1 is the laptop dock.' }, widgets: ['xkcd'], customDraft: '',
     incomingOptions: { loop: 'Off', speed: 1, volume: 0 }, ytLink: '',
     chatSearch: false, chatQuery: '', threads: clone(THREADS), threadId: 't1', pickedMsg: null, editingTitle: false,
     draft: '', draftOpen: false, draftHeight: 200, chatAttachment: null,
@@ -40,7 +40,7 @@ function miniRow(s) {
 function panelHtml(state) {
   const s = state.panel && state.sessions[state.panel];
   if (!s) return '';
-  return `<div class="panel" role="region" aria-label="Player"><div class="handle" data-drag="panel"><span></span></div><div class="panel-title"><div>${status(sessionTone(s), `${sessionWords(s)} on ${state.panel === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></div>${ibtn('expand', 'Open the full player', 'go', OUTPUT_PAGE[state.panel], 'quiet', 18)}</div>${playerControls(state, state.panel, true)}</div>`;
+  return `<div class="panel" role="region" aria-label="Player"><div class="handle" data-drag="panel"><span></span></div><div class="panel-title"><div>${status(sessionTone(s), `${sessionWords(s)} on ${state.panel === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></div>${ibtn('up', 'Open the full player', 'go', OUTPUT_PAGE[state.panel], 'quiet', 18)}</div>${playerControls(state, state.panel, true)}</div>`;
 }
 
 function shadeHtml(state) {
@@ -86,10 +86,12 @@ function tidy(el) {
     c.classList.toggle('cut', over);
   }
   for (const s of el.querySelectorAll('.seg')) {
-    s.classList.toggle('more', s.scrollWidth > s.clientWidth + 1 && s.scrollLeft + s.clientWidth < s.scrollWidth - 1);
     const chosen = s.querySelector('[aria-selected="true"]');
     if (chosen && s.scrollWidth > s.clientWidth) s.scrollLeft = chosen.offsetLeft - (s.clientWidth - chosen.clientWidth) / 2;
+    s.classList.toggle('more', s.scrollLeft + s.clientWidth < s.scrollWidth - 1);
+    s.classList.toggle('less', s.scrollLeft > 1);
   }
+  if (el.dataset.end) { const area = el.querySelector('.p-scroll'); area.scrollTop = area.scrollHeight; }
   const crumbs = el.querySelector('.crumbs');
   if (!crumbs) return;
   for (const step of crumbs.querySelectorAll('.crumb:not(.now)')) {
@@ -106,6 +108,7 @@ function render(keepScroll = true) {
   dress(phone, S);
   phone.innerHTML = phoneHtml(S);
   phone.querySelector('.p-scroll').scrollTop = scroll;
+  delete phone.dataset.end;
   tidy(phone);
   if (location.hash.slice(1) !== S.place) history.replaceState(null, '', '#' + S.place);
   if (typeof renderReview === 'function') renderReview();
@@ -141,7 +144,7 @@ function back() {
   if (S.full) { S.full = false; return render(); }
   if (S.panel) { S.panel = null; return render(); }
   const target = backTarget(S.place);
-  if (target) go(target); else toast('Back from Home leaves csync');
+  if (target) go(target); else toast(PLACE[S.place].fromOutside ? 'Back returns to the app you shared from' : 'Back from Home leaves csync');
 }
 
 // playing
@@ -156,6 +159,7 @@ function start(output, title, at = 0, total = 0, source = '') {
   const found = findItem(title), known = HISTORY.find(h => h.title === title);
   S.sessions[output] = { title, source: source || known?.source || S.source, at: Number(at) || 0, total: Number(total) || known?.total || (found.kind === 'image' ? 1 : 2580),
     paused: false, busy: true, error: '', volume: output === 'Pi screen' ? S.defaults.startVolume : 35, speed: 1, rotate: 0, loop: S.defaults.loop, favorite: false, skip: S.defaults.skip, pending: {} };
+  if (S.place === 'incoming') Object.assign(S.sessions[output], { loop: S.incomingOptions.loop, speed: S.incomingOptions.speed, volume: S.incomingOptions.volume });
   go(OUTPUT_PAGE[output]);
   timers[output + ':load'] = setTimeout(() => { if (S.sessions[output]) { S.sessions[output].busy = false; render(); } }, 700);
 }
@@ -203,7 +207,7 @@ const ACTS = {
   'view-note': v => { S.view.note = v; render(); },
   fold: id => { S.folded[id] = !S.folded[id]; render(); },
   toggle: key => { S[key] = !S[key]; if (!S[key]) { if (key === 'mediaSearch') S.mediaQuery = ''; if (key === 'chatSearch') S.chatQuery = ''; if (key === 'notesSearch') S.noteQuery = ''; } render(); },
-  sheet: arg => { const [type, ...rest] = arg.split('|'); S.modelDraft = null; S.sheet = { type, arg: rest.join('|') }; render(); },
+  sheet: arg => { const [type, ...rest] = arg.split('|'); S.modelDraft = null; S.customDraft = ''; S.sheet = { type, arg: rest.join('|') }; render(); },
   'close-sheet': () => { S.sheet = null; S.modelDraft = null; render(); },
   toast: text => { S.sheet = null; toast(text); },
   copy: text => toast(`Copied ${text}`),
@@ -214,12 +218,6 @@ const ACTS = {
   play, 'play-now': arg => { const [output, title, at, total, source] = arg.split('|'); start(output, title, at, total, source); },
   resume: index => { const h = HISTORY[index]; play(`${h.output}|${h.title}|${h.at}|${h.total}|${h.source}`); },
   'play-link': () => { const link = S.ytLink.trim(); S.ytLink = ''; play(`Pi screen|${link.replace(/^https?:\/\//, '').slice(0, 40)}|0|600|YouTube`); },
-  'play-incoming': output => {
-    const title = { Video: 'VID 2026-09-26.mp4', Image: 'IMG 4410.jpg', YouTube: 'F-Droid 2.0, the biggest update in years', Instagram: 'A reel from Instagram', File: 'quote.pdf' }[S.view.incoming];
-    play(`${output}|${title}|0|778|${S.view.incoming}`);
-    const s = S.sessions[output];
-    if (s && s.title === title) { Object.assign(s, { loop: S.incomingOptions.loop, speed: S.incomingOptions.speed, volume: S.incomingOptions.volume }); render(); }
-  },
   'show-camera': () => play('Pi screen|Pi camera, live|0|1|Pi camera'),
   move: from => { const s = S.sessions[from], to = from === 'Pi screen' ? 'This phone' : 'Pi screen'; clearPending(from); S.sessions[from] = null; start(to, s.title, s.at, s.total, s.source); },
   'p-pause': output => {
@@ -238,32 +236,33 @@ const ACTS = {
   'p-skip': arg => { const [output, dir] = arg.split('|'), s = S.sessions[output]; s.at = Math.max(0, Math.min(s.total, s.at + Number(dir) * s.skip)); render(); },
   'p-favorite': output => { const s = S.sessions[output]; s.favorite = !s.favorite; render(); },
   'p-rotate': output => { const s = S.sessions[output]; later(output, 'rotate', ((s.pending.rotate ?? s.rotate) + 90) % 360); },
-  'p-loop': output => { const s = S.sessions[output], order = ['Off', 'One', 'All']; later(output, 'loop', order[(order.indexOf(s.pending.loop ?? s.loop) + 1) % 3]); },
+  'p-loop': output => { const s = S.sessions[output]; later(output, 'loop', (s.pending.loop ?? s.loop) === 'On' ? 'Off' : 'On'); },
   'set-skip': arg => { const [output, n] = arg.split('|'); if (output === 'default') S.defaults.skip = Number(n); else S.sessions[output].skip = Number(n); S.sheet = null; render(); },
-  'default-loop': v => { S.defaults.loop = v; render(); },
+  'default-loop': () => { S.defaults.loop = S.defaults.loop === 'On' ? 'Off' : 'On'; render(); },
   'toggle-resume': () => { S.defaults.resume = !S.defaults.resume; render(); },
 
   'pick-source': name => { Object.assign(S, { source: name, folder: '', mediaQuery: '', sheet: null }); if (S.place !== 'media') return go('media', 'Files'); if (S.view.media === 'Access') S.view.media = 'Files'; toast(`Browsing ${name === 'This phone' ? 'this phone' : name}`); },
   folder: name => { S.folder = name; S.sheet = null; render(false); },
   cover: name => { S.cover = name; toast(`${name} is the cover`); },
-  'cover-from-share': () => { S.cover = 'IMG 4410.jpg'; toast('IMG 4410.jpg is the cover'); },
+  'set-cover': title => { S.sheet = null; if (!COVERS.includes(title)) COVERS.push(title), COVER_ART.push(COVER_ART[0]); S.cover = title; toast(`${title} is the cover`); },
   'frame-fit': v => frame('fit', v), 'frame-crop': v => frame('crop', v),
   'frame-turn': () => frame('rotate', (((S.framing[S.cover] || {}).rotate || 0) + 90) % 360),
   'frame-clear': () => { delete S.framing[S.cover]; toast(`Framing cleared for ${S.cover}`); },
 
   'pick-recipient': name => { S.recipient = name; S.sheet = null; render(); },
+  'pick-recipient-stay': name => { S.recipient = name; render(); },
+  'send-item': arg => { const [kind, ...rest] = arg.split('|'); S.sheet = null; deliver(rest.join('|'), { image: 'Image', video: 'Video', text: 'Text', link: 'Link' }[kind] || 'File'); },
+  'widget-toggle': name => { S.widgets = S.widgets.includes(name) ? S.widgets.filter(w => w !== name) : [...S.widgets, name]; S.sheet = null; toast(S.widgets.includes(name) ? `${name} added` : `${name} removed`); },
   'pick-recipient-go': name => { S.recipient = name; go('share'); },
   attach: arg => { const [kind, title] = arg.split('|'); S.attachment = { kind, title }; S.sheet = null; S.failed = ''; render(); },
-  'attach-go': arg => { const [kind, title] = arg.split('|'); S.attachment = { kind: kind === 'video' ? 'Video' : kind === 'image' ? 'Image' : 'File', title }; S.failed = ''; go('share'); },
   detach: () => { S.attachment = null; S.failed = ''; render(); },
-  'use-clip': () => { S.shareText = S.clip.body; S.sheet = null; render(); },
-  'send-clip': () => { S.sheet = null; deliver('Clipboard text', 'Text'); },
+  'use-clip': () => { if (S.clip.kind === 'Image') S.attachment = { kind: 'Image', title: 'Clipboard image' }; else S.shareText = S.clip.body; S.sheet = null; render(); },
+  'send-clip': () => { S.sheet = null; deliver(S.clip.kind === 'Image' ? 'Clipboard image' : 'Clipboard text', S.clip.kind); },
   send: () => {
     if (S.attachment) deliver(S.attachment.title, S.attachment.kind, true);
     if (S.shareText.trim() && !S.failed) { deliver(S.shareText.trim().split('\n')[0].slice(0, 40), 'Text'); S.shareText = ''; }
     render();
   },
-  'send-incoming': () => { deliver({ File: 'quote.pdf' }[S.view.incoming] || 'Shared item', 'File'); go('share'); },
   resend: index => { const t = S.sent[index]; S.sheet = null; S.recipient = t.to; deliver(t.title, t.kind); },
 
   'open-thread': id => { S.threadId = id; S.draft = ''; go('conversation'); },
@@ -274,7 +273,7 @@ const ACTS = {
   'pick-msg': i => { S.pickedMsg = S.pickedMsg === Number(i) ? null : Number(i); render(); },
   'draft-open': () => { S.draftOpen = true; render(); phone.querySelector('.draft textarea')?.focus(); },
   'attach-chat-file': arg => { const [kind, title] = arg.split('|'); S.chatAttachment = { kind, title }; S.sheet = null; render(); },
-  'attach-chat': arg => { const [id, title] = arg.split('|'); if (id === 'new') ACTS['new-thread'](); else { S.threadId = id; go('conversation'); } S.chatAttachment = { kind: 'File', title }; render(); },
+  'attach-chat': arg => { const [id, kind, ...rest] = arg.split('|'); if (id === 'new') ACTS['new-thread'](); else { S.threadId = id; go('conversation'); } S.chatAttachment = { kind: { image: 'Image', video: 'Video', text: 'Text', link: 'Link' }[kind] || 'File', title: rest.join('|') }; render(); },
   'chat-detach': () => { S.chatAttachment = null; render(); },
   'send-chat': () => {
     const text = S.draft.trim(), t = thread(S);
@@ -289,7 +288,6 @@ const ACTS = {
   'draft-effort-default': v => { S.modelDraft = { ...currentDraft('default'), effort: v }; render(); },
   'save-model': scope => { saveModel(scope); toast('Model saved'); },
   'save-model-send': scope => { saveModel(scope); ACTS['send-chat'](); },
-  'default-effort': v => { S.defaultEffort = v; render(); },
   provider: v => { S.provider = v; render(); },
   fork: index => { const t = thread(S), id = 't' + Date.now(); S.threads.unshift({ ...clone(t), id, title: `${t.title}, fork`, when: 'Now', messages: clone(t.messages.slice(0, Number(index) + 1)) }); S.threadId = id; S.sheet = null; go('conversation'); },
 
@@ -299,7 +297,7 @@ const ACTS = {
 
   'open-note': id => { S.noteId = id; S.view.note = 'Preview'; go('note'); },
   'new-note': () => { const id = 'n' + Date.now(); S.notes.unshift({ id, title: 'Untitled note', edited: 'Edited just now', body: '' }); S.noteId = id; S.view.note = 'Plain'; go('note'); },
-  'save-note': () => { S.notes.find(n => n.id === S.noteId).edited = 'Edited just now'; toast('Note saved'); },
+  'save-note': () => { const n = S.notes.find(x => x.id === S.noteId), rich = phone.querySelector('[data-rich]'); if (rich) n.body = rich.innerText.trim(); n.edited = 'Edited just now'; toast('Note saved'); },
   'delete-note': () => { S.notes = S.notes.filter(n => n.id !== S.noteId); go('notes'); },
   'open-pin': id => { S.pinId = id; go('pin'); },
   'new-pin': () => { const id = 'p' + Date.now(); S.pins.unshift({ id, title: 'Untitled pin', link: '', text: '', tags: [], about: '' }); S.pinId = id; go('pin'); },
@@ -313,8 +311,8 @@ const ACTS = {
   theme: v => { S.theme = v.toLowerCase(); render(); },
   size: v => { S.size = { Small: 'sm', Medium: 'md', Large: 'lg' }[v]; render(); },
   accent: id => { S.accent = id; render(); },
-  'use-custom': () => { S.custom = phone.querySelector('[data-in="custom"]').value; S.accent = 'custom'; S.sheet = null; render(); },
-  'in-loop': v => { S.incomingOptions.loop = v; render(); }
+  'use-custom': () => { S.custom = S.customDraft || S.custom || '#8B5CF6'; S.customDraft = ''; S.accent = 'custom'; S.sheet = null; render(); },
+  'in-loop': () => { S.incomingOptions.loop = S.incomingOptions.loop === 'On' ? 'Off' : 'On'; render(); }
 };
 
 const currentDraft = scope => S.modelDraft || { model: scope === 'default' ? S.defaultModel : S.model, effort: scope === 'default' ? S.defaultEffort : S.effort };
@@ -360,6 +358,8 @@ phone.addEventListener('input', event => {
   if (key === 'startVolume') { S.defaults.startVolume = Number(value); return say('startVolume', value === '0' ? 'Muted' : value + '%'); }
   if (key === 'in-speed') { S.incomingOptions.speed = Number(value); return renderTyping(key); }
   if (key === 'in-volume') { S.incomingOptions.volume = Number(value); return renderTyping(key); }
+  if (key === 'hue') { S.customDraft = hueHex(Number(value)); return renderTyping(key); }
+  if (key === 'hex') { if (/^#[0-9a-f]{6}$/i.test(value.trim())) { S.customDraft = value.trim().toUpperCase(); return renderTyping(key); } return; }
   if (key === 'threadTitle') { thread(S).title = value; return; }
   if (key === 'noteTitle') { S.notes.find(n => n.id === S.noteId).title = value; return; }
   if (key === 'noteBody') { S.notes.find(n => n.id === S.noteId).body = value; const rich = phone.querySelector('#rich-preview'); if (rich) rich.innerHTML = markdown(value); return; }

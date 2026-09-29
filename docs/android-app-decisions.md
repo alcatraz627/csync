@@ -2,7 +2,9 @@
 # csync phone app: conflicts found and how each is settled
 
 Written 2026-09-29. Each row is a place where the owner's recorded asks, the
-docs, the old mock and build 2.34 disagree. Each has a ruling. The owner gave
+docs, the old mock and build 2.34 disagree. Each has a ruling. An independent review on 2026-09-29
+(`/Users/alcatraz627/Code/Claude/csync/.claude/output/20260929-ui-mock/review-opus.md`)
+added rows B14, D7, D8 and section D2. The owner gave
 this session authority to decide on 2026-09-29 ("I trust you to take decisions
 on your procedure or extra things to do"), so rulings marked **Decided** are
 applied in the app model and the mock. Rows marked **Owner** need the owner's
@@ -24,7 +26,7 @@ unless they start with a slash. Ledger ids refer to
 | A1 | Every bar place is drawn as a child of Home. Media, a bar place, shows a Back arrow and "Home / Media". The old mock defines it that way, so the native app copied a wrong model faithfully. | `assets/android-ui-clickthrough/app.js:58`; `40-media-files.png`, `20-chat-all.png`, `30-more.png` | **Decided.** The five bar places are siblings. A bar place shows no arrow and no "Home /". App model section 3 and 4. |
 | A2 | Breadcrumbs drop the middle level in some places and keep it in others. Tools reads "Home / Tools", Captures reads "Home / Camera / Captures", the assistant guide reads "Home / More / Capabilities". | `32-tools.png`, `52-camera-captures.png`, `34-assistant-capabilities.png`; `app.js:85` | **Decided.** The path is never shortened by removing a step. When it does not fit, earlier steps keep their icon and lose their words. |
 | A3 | The audit backlog offers "drop the breadcrumbs" as an option. The owner asked for a proper breadcrumb six times (G-01 to G-06). | `combined-backlog.md` item 2; ledger G-01 | **Decided.** Breadcrumbs stay and are derived from the map. Dropping them is not an option. |
-| A4 | Notes and Pi display are children of Home in the old mock, Notes is reached from More in the app, and Camera and Tools are children of More in both. Home's grid mixes all three kinds. MO-04 says Notes in More's Areas list is wrong "per the approved mock". | `app.js:58`; `30-more.png`; ledger MO-04 | **Decided.** One rule: a place that is not in the bar lives in More. Home's tiles are shortcuts. Notes lives in More. This overrides MO-04, because MO-04 measured against a mock whose hierarchy was the problem. |
+| A4 | Notes and Pi display are children of Home in the old mock, Notes is reached from More in the app, and Camera and Tools are children of More in both. Home's grid mixes all three kinds. MO-04 says Notes in More's Areas list is wrong "per the approved mock". | `app.js:58`; `30-more.png`; ledger MO-04 | **Decided.** One rule: a place that is not in the bar lives in More. Home's tiles are shortcuts. Notes lives in More. This overrides MO-04, because MO-04 measured against a mock whose hierarchy was the problem. More's sections are named On the Pi, Looking after things and Reference, so nothing is filed under "Areas". **The owner should look at this one.** |
 | A5 | Pi display is a page, the full player is another page, and the idle full player shows a grey box with disabled controls. | `app.js:205-219`, `features.js:3-11`; ledger C-07, C-08 | **Decided.** One page per output. Media / Pi screen is the player while something plays and shows the cover and ways to play when idle. |
 | A6 | The output chooser is a page between Media and the player, so Back from the player lands on a chooser. | `app.js:58` (`player:'output'`) | **Decided.** Choosing an output is a sheet. Back from the player goes to Media. |
 | A7 | Detail opens as a page in Tools, a sheet in some of Settings and a page in the rest of Settings. | `60-tools-power-detail.png`, `54-settings-device-detail.png`, `64-settings-provider.png` | **Decided.** The table in app model section 5 decides by what the detail is. |
@@ -48,6 +50,7 @@ unless they start with a slash. Ledger ids refer to
 | B11 | Tools' heading says "Pi services are ready" above "Undervoltage was recorded since boot". | `32-tools.png` | **Decided.** The heading states the worst current state. |
 | B12 | The Pi power sheet repeats the row's own subtitle and adds nothing. | `60-tools-power-detail.png` | **Decided.** A facts sheet carries facts the row does not: the reading, since when, what it blocks, what to do. |
 | B13 | Widgets, Tools and the old mock list planned features as rows inside the app. | `62-tools-widgets.png`, `32-tools.png` | **Decided.** The app shows what exists. Planning lives in docs. The mock's review panel, outside the phone, says which screens the native app has not built yet. |
+| B14 | T-06 asks Widgets to mark what is built and what is planned. Ruling B13 removes planned rows, which would leave the media remote, the tiles and the shortcuts looking available when native has not built them. | ledger T-06; review finding on B13 | **Decided.** The mock is the target, so it shows them. The native app shows a widget or tile row only in the release that builds it, and never with a "planned" label. The mock's review panel says which screens native has not built. |
 
 ## C. Rules that were attributed to the owner but are not in the owner's words
 
@@ -67,6 +70,17 @@ unless they start with a slash. Ledger ids refer to
 | D4 | The same assistant tools have two names ("Pi health" and "Home health", "Your devices" and "List peers"). | `23-chat-tools.png`, `34-assistant-capabilities.png` | **Decided.** The plain names from Chat's Tools view are used everywhere. |
 | D5 | Captures are titled "Photo · 7:22 AM" with the subtitle "Photo · 20 kB", and carry no date. | `52-camera-captures.png` | **Decided.** Title is the kind and the day, subtitle is the time and size, grouped by day. |
 | D6 | Notes show "Markdown · revision 19". | `35-notes.png` | **Decided.** "Edited today" style dates. The revision is in the note's facts sheet. |
+| D7 | "Tools" names two things: Chat's list of what the assistant can use (CH-19, the owner's word) and the page in More (T-asks and "More, Tools, Update csync from Pi", also the owner's words). | `23-chat-tools.png`, `32-tools.png` | **Decided.** Both keep the owner's word. They have different icons, and the assistant guide opens the list as a sheet instead of jumping to Chat. |
+| D8 | One action had several names: Download and Save, Save as a note and Add to a note. | review finding 1 | **Decided.** One name each, listed in app model section 7a. |
+
+## D2. Product choices that were in the app without a record
+
+| # | Choice | Evidence | Ruling |
+|---|---|---|---|
+| P1 | Playback on the Pi screen starts muted. | The old design system and the old mock both state it; P-01 reports a film "blasting full volume". | **Decided.** Kept as the default, and made a setting: Settings, Playback, Starting volume. |
+| P2 | The Pi online dot sits in Chat's page heading, not on each conversation row. | ledger CH-22; round 5 plan, Conversations row | **Decided.** Heading. The Pi's state is one fact about the assistant, not a fact about each conversation. This follows round 5's reading of CH-22. |
+| P3 | Loop had three states with no queue to loop over. | ledger P-07 "click to toggle" | **Decided.** Loop is On or Off. |
+| P4 | Sending the phone's own camera to the Pi screen (O-09). | ledger O-09 "look into that" | **Owner.** Not shown. It needs a feasibility test on the hardware first. The Pi camera to the Pi screen is shown. |
 
 ## E. The five rulings the ledger left open
 

@@ -56,7 +56,7 @@ const VIDEOS = [
 
 // seconds are kept so progress bars and resume labels come from one number
 const HISTORY = [
-  { title: 'F-Droid 2.0, the biggest update in years', source: 'YouTube', output: 'Pi screen', at: 389, total: 778 },
+  { title: 'F-Droid 2.0, the biggest update in years', source: 'YouTube', output: 'Pi screen', at: 312, total: 778 },
   { title: "Blackadder's Christmas Carol", source: 'Pi USB', output: 'This phone', at: 10, total: 2580 },
   { title: 'Walk in the hills', source: 'Pi USB', output: 'Pi screen', at: 24, total: 480 },
   { title: 'A Matter of Life and Death', source: 'Elements', output: 'Pi screen', at: 3120, total: 6240 }
@@ -79,10 +79,10 @@ const THREADS = [
     messages: [
       { me: true, text: 'Find **A Matter of Life and Death** on Elements and play it on the Pi screen. [Film notes](https://example.org/notes).', when: '18:40' },
       { thinking: true },
-      { me: false, text: 'Found it on Elements. It is playing on the Pi screen, muted.', when: '18:41',
+      { me: false, text: 'Found it on Elements and started it on the Pi screen, muted.', when: '18:41',
         results: [
-          { kind: 'media', title: 'A Matter of Life and Death', sub: 'Playing on Pi screen' },
-          { kind: 'facts', title: 'Playback status', sub: 'Four readings' }
+          { kind: 'media', title: 'A Matter of Life and Death', sub: 'Started on Pi screen' },
+          { kind: 'facts', title: 'Playback status', sub: 'Read at 18:41' }
         ] },
       { me: true, text: 'What volume is it at?', when: '18:42' },
       { me: false, text: 'Volume is 0. The Pi screen starts muted, so raise it from the player when you are ready.', when: '18:42' }
@@ -146,11 +146,19 @@ const CAPTURES = [
 ];
 
 const COVERS = ['Desk at sunset', 'Mountain light', 'Blueprint', 'Harbour at night'];
+const COVER_ART = ['linear-gradient(160deg,#6b4a2f,#a8683a 45%,#2f3d52)', 'linear-gradient(160deg,#35506b,#8aa6b8 50%,#e8d9c0)', 'linear-gradient(160deg,#10294a,#2768b2 60%,#0e1d33)', 'linear-gradient(160deg,#0d1422,#2a3550 55%,#c98a3a)'];
+
+const WIDGETS = [
+  { name: 'xkcd', kind: 'Launcher widget', icon: 'image', shows: 'The latest comic', updates: 'Three times a week' },
+  { name: 'Media remote', kind: 'Launcher widget', icon: 'play', shows: 'What the Pi screen is playing, with Pause and Stop', updates: 'While something plays' },
+  { name: 'Pi camera', kind: 'Quick Settings tile', icon: 'camera', shows: 'Opens the live picture', updates: 'When tapped' },
+  { name: 'Send the clipboard', kind: 'Quick Settings tile', icon: 'clipboard', shows: 'Sends the clipboard to your last device', updates: 'When tapped' }
+];
 
 const BUSY_APPS = [
-  { name: 'Chrome', memory: '612 MB', cpu: '9%' },
-  { name: 'csync', memory: '148 MB', cpu: '2%' },
-  { name: 'Photos', memory: '131 MB', cpu: '1%' }
+  { name: 'Chrome', memory: '612 MB', cpu: '9%', trend: 'Memory rising' },
+  { name: 'csync', memory: '148 MB', cpu: '2%', trend: 'Level' },
+  { name: 'Photos', memory: '131 MB', cpu: '1%', trend: 'Level' }
 ];
 
 // fill passes 4.5:1 with white text; onDark and onLight are the text colours

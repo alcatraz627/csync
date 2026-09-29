@@ -113,6 +113,7 @@ layer uses the same names.
 | `notice` | tone, one sentence, one action | For the state of the whole page. |
 | `empty` | icon, title, one line, one action | Says what belongs here. |
 | `sheet` | title, content, buttons | Handle, no close button. Buttons only when it changes something. |
+| `itemActions` | the kind of item | The one list of what an item can do. No screen writes its own. |
 | `facts` | pairs | Label on the left, value on the right. |
 | `playerControls` | the output | The same controls at page and panel size. |
 
@@ -127,11 +128,32 @@ by `runChecks()` in the mock.
 - A text character used as a chevron or a separator mark.
 - More than two facts on one line.
 - A value that was not measured, shown as a dash or as "unavailable".
+- A status word that is not in the app model's vocabulary.
+- A second name for an action that already has one.
+- Two options in one control with the same icon.
+- One word broken across two lines.
 - The words planned, prototype or fixture.
 - A button with no spoken name, or smaller than 48 by 48.
 - Two primary actions on one page.
 - A path that does not fit the top bar, or a top bar that is not 52 tall.
 - Anything wider than the phone.
+
+## Icons
+
+One icon per action and one action per icon.
+
+| Icon | Means |
+|---|---|
+| phone | This phone, as an output or a source |
+| two devices | Choosing or sending to a device |
+| screen | The Pi screen |
+| arrow leaving a box | Leaves csync: another app, VLC, Shizuku |
+| four corners | Full screen |
+| arrow up | Up one folder, or open the full player from the panel |
+| tray with arrow | Save on this phone, and Received |
+| list | All |
+| three lines | More |
+| clipboard | The clipboard, and the list of assistant tools |
 
 ## How the native app is checked against this
 

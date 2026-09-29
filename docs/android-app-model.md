@@ -130,6 +130,7 @@ gesture alike.
 | A sheet is open | Closes the sheet |
 | The player panel is open | Collapses the panel to the mini row |
 | A child place | Opens its parent, one level up (G-02, MO-01) |
+| From another app | Returns to the app the item was shared from |
 | A bar place other than Home | Opens Home (system gesture only, no arrow) |
 | Home | Leaves the app (system gesture only, no arrow) |
 
@@ -177,9 +178,19 @@ The breadcrumb says where you are. The heading says what you are looking at.
 | A setting with two or three states | Inline, in the row | Rotate, Loop, Receiving on this phone |
 
 Sheet rules: a drag handle, no close button at the top or the bottom (G-09,
-G-10). It closes by dragging down, tapping outside, or Back (G-11). A sheet
-that changes something needs an explicit Save, Send or confirm button and
-never commits on a tap of a row (CH-11, CH-13). Only one sheet is open at a
+G-10). It closes by dragging down, tapping outside, or Back (G-11).
+
+When a tap is enough and when a button is needed:
+
+| The sheet | Commits by |
+|---|---|
+| Picks one of a list, stays on this phone, and is undone by picking again (source, recipient, skip length) | The tap on the row |
+| Sends, deletes, replaces, installs or stops something | A named button. Rows only select. |
+| Sets more than one thing together (model and thinking) | Save (CH-11, CH-13) |
+| Adjusts one value with a slider | The slider itself (P-09) |
+
+Send to a conversation adds the item to the message being written. Nothing
+is sent until Send is pressed in that conversation. Only one sheet is open at a
 time; opening another replaces it (P-19). The player panel is not a sheet, so
 a sheet may open above it.
 
@@ -230,19 +241,54 @@ ways to put something on the screen. It never shows a row of dead controls.
 ## 7. Status
 
 One vocabulary, always a coloured dot followed by words. Colour alone never
-carries the meaning.
+carries the meaning. The mock's `runChecks()` rejects any status word that is
+not in this table.
 
 | Dot | Meaning | Words |
 |---|---|---|
-| Green | Working and reachable | Online, Ready, Connected, Playing |
-| Amber | Working, needs attention | Checking, Low power, Applying |
-| Red | Not working | Failed, Blocked |
-| Grey | Not present, by design or for now | Offline, Disconnected, Stopped, Not set up |
+| Green | Working | Online, Ready, Connected, Playing, Live, Recording, Delivered, Allowed, Added, or a count such as "6 videos" |
+| Amber | Working, needs attention | Checking, Connecting, Loading, Low power, "applying" after a value, or a part count such as "1 of 2 connected" |
+| Red | Did not work | Failed, Blocked |
+| Grey | Not present, by design or for now | Offline, Disconnected, Paused, Stopped, Not set up, Not added, Showing the cover |
+
+The line at the top of a page may say the same thing as a sentence, such as
+"Raspberry Pi is online".
+
+A command that fails does not change what is playing, so the session stays
+Playing and a notice on the page says what failed and offers Try again.
+
+When the Pi cannot be reached, every screen says so the same way: a grey
+status, one notice, and one action that opens Connection.
 
 A value that has not been measured is not shown. There is no dash, no
 "unavailable" and no "planned" inside the phone (CH-18, CH-27, T-06). A
 screen whose data needs something that is missing leads with that one fact
 and the way to fix it.
+
+## 7a. What each kind of item can do
+
+One list, used by Media, Received, Captures, conversations, notes, pins and
+From another app. The same item offers the same actions under the same names
+wherever it appears (M-10, N-08, N-09). The mock builds every item sheet from
+`itemActions()` in `sheets.js`.
+
+| Action | Video, audio | Image | Document | Text | Link | Folder |
+|---|---|---|---|---|---|---|
+| Play on Pi screen, Play on this phone | yes | | | | yes | |
+| Open in VLC | video | | | | | |
+| Show on Pi screen | | yes | | | | |
+| Set as the Pi cover | | yes | | | | |
+| Open | | | | | | yes |
+| Copy the text | | | | yes | | |
+| Save on this phone | yes | yes | yes | | | yes |
+| Send to a device | yes | yes | yes | yes | yes | yes |
+| Send to a conversation | yes | yes | yes | yes | yes | |
+| Add to a note | | yes | | yes | yes | |
+| Save as a pin | | | | yes | yes | |
+| Share with another app | yes | yes | yes | yes | yes | yes |
+
+File details is added for items that live on a drive, and Delete for
+captures.
 
 ## 8. Words on screen
 

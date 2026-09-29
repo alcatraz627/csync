@@ -26,7 +26,7 @@ const PLACES = [
     asks: ['SH-01', 'SH-02', 'SH-03', 'SH-11', 'SH-13', 'SH-14'] },
   { id: 'received', kind: 'page', parent: 'share', label: 'Received', icon: 'download', built: 'partly',
     asks: ['SH-11'] },
-  { id: 'incoming', kind: 'page', parent: 'share', label: 'From another app', icon: 'upload', built: 'partly',
+  { id: 'incoming', kind: 'page', parent: 'share', label: 'From another app', icon: 'upload', built: 'partly', fromOutside: true,
     views: ['Video', 'Image', 'YouTube', 'Instagram', 'File'],
     asks: ['SH-04', 'SH-05', 'SH-06', 'SH-07', 'SH-08', 'SH-09', 'SH-10', 'SH-12', 'N-09', 'O-06'] },
 
@@ -87,6 +87,7 @@ function barOf(id) { return pathTo(id)[0]; }
 /** Where Back goes from this place with nothing open on top of it. */
 function backTarget(id) {
   const place = PLACE[id];
+  if (place.fromOutside) return null;
   if (place.parent) return place.parent;
   return id === 'home' ? null : 'home';
 }

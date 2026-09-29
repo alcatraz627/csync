@@ -83,7 +83,7 @@ function tile(o) {
 
 /** Pick one of a few. items: [label, icon, disabled?]. */
 function seg(items, selected, act, label) {
-  return `<div class="seg" role="tablist" aria-label="${esc(label)}">${items.map(([name, symbol, off]) =>
+  return `<div class="seg${items.length > 4 ? ' tight' : ''}" role="tablist" aria-label="${esc(label)}">${items.map(([name, symbol, off]) =>
     `<button type="button" role="tab" aria-selected="${name === selected}" ${on(act, name)} ${off ? 'disabled' : ''}>${icon(symbol, 15)}<span>${esc(name)}</span></button>`).join('')}</div>`;
 }
 
@@ -148,6 +148,23 @@ function markdown(source) {
     else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
   }
   return `<div class="md">${out.join('')}</div>`;
+}
+
+const hexRgb = hex => (hex.replace('#', '').match(/../g) || ['0', '0', '0']).map(x => parseInt(x, 16) || 0);
+/** How well white text reads on a colour, as a contrast ratio. */
+function whiteOn(hex) {
+  const [r, g, b] = hexRgb(hex).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05);
+}
+function hueOf(hex) {
+  const [r, g, b] = hexRgb(hex).map(v => v / 255), max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+  if (!d) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return Math.round((h * 60 + 360) % 360);
+}
+function hueHex(h) {
+  const f = n => { const k = (n + h / 30) % 12, c = 0.42 - 0.273 * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(c * 255).toString(16).padStart(2, '0'); };
+  return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
 const KIND_ICON = { folder: 'folder', video: 'video', image: 'photo', audio: 'volume', doc: 'file', Text: 'text', Image: 'photo', Video: 'video', File: 'file', Link: 'link' };

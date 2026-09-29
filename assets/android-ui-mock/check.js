@@ -1,6 +1,14 @@
 // Checks every screen and sheet in both themes and all three text sizes against
 // the rules in docs/android-app-model.md. Run `runChecks()` in the browser console.
 
+// The status words the app may use, by dot colour. docs/android-app-model.md section 7 is the source.
+const STATUS_WORDS = {
+  good: ['Online', 'Ready', 'Connected', 'Playing', 'Live', 'Recording', 'Delivered', 'Allowed', 'Added'],
+  warn: ['Checking', 'Connecting', 'Loading', 'Low power', 'applying'],
+  bad: ['Failed', 'Blocked'],
+  idle: ['Offline', 'Disconnected', 'Paused', 'Stopped', 'Not set up', 'Not added', 'Showing the cover', 'No device online']
+};
+
 function runChecks() {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:-9999px;top:0';
@@ -23,7 +31,7 @@ function runChecks() {
       const el = document.createElement('div');
       el.className = 'phone';
       host.appendChild(el);
-      try { f.change(s); dress(el, s); el.innerHTML = phoneHtml(s); } catch (e) { found.push(`${tag}: cannot be drawn, ${e.message}`); el.remove(); continue; }
+      try { f.change(s); dress(el, s); if (f.end) el.dataset.end = '1'; el.innerHTML = phoneHtml(s); } catch (e) { found.push(`${tag}: cannot be drawn, ${e.message}`); el.remove(); continue; }
       tidy(el);
       rendered++;
       const box = el.getBoundingClientRect();
@@ -62,6 +70,7 @@ function runChecks() {
         if (new Set(drawn).size < drawn.length) found.push(`${tag}: two options in "${s.getAttribute('aria-label')}" share an icon`);
       }
       for (const b of el.querySelectorAll('.seg button span')) if (b.scrollWidth > b.clientWidth + 1) found.push(`${tag}: tab "${b.innerText}" is cut`);
+      for (const t of el.querySelectorAll('.row-title .clamp')) { const word = t.innerText.trim(); if (!/[\s-]/.test(word) && t.clientHeight > parseFloat(getComputedStyle(t).lineHeight) * 1.5) found.push(`${tag}: the one word "${word}" is broken across lines`); }
       if (el.querySelectorAll('.btn.primary').length + el.querySelectorAll('.p-page .ibtn.go, .p-page .shutter').length > 1 && !el.querySelector('.sheet'))
         found.push(`${tag}: more than one primary action on the page`);
 
@@ -70,12 +79,20 @@ function runChecks() {
       for (const a of el.querySelectorAll('[data-act="go"]')) if (!PLACE[a.dataset.arg]) found.push(`${tag}: place "${a.dataset.arg}" does not exist`);
       if (el.querySelector('.sheet .ibtn[aria-label*="lose" i]')) found.push(`${tag}: a sheet has a close button`);
 
+      for (const st of el.querySelectorAll('.status:not(.lead)')) {
+        const tone = ['good', 'warn', 'bad'].find(t => st.querySelector('.dot').classList.contains(t)) || 'idle', said = st.innerText.trim();
+        const known = STATUS_WORDS[tone].some(w => said === w || said.startsWith(w + ' ') || said.startsWith(w + ',') || said.endsWith(w));
+        const count = tone === 'good' && /^\d/.test(said) || tone === 'warn' && /^\d+ of \d+/.test(said);
+        const measure = st.closest('.sheet') && /to 1$/.test(said);
+        if (!known && !count && !measure) found.push(`${tag}: status "${said}" with a ${tone} dot is not in the vocabulary`);
+      }
       const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       for (let n; (n = walk.nextNode());) {
         const t = n.nodeValue.trim();
         if (/\b[A-Z]{3,}\s+[A-Z]{2,}\b/.test(t) && t === t.toUpperCase() && !/^[A-Z]{2,5} \d/.test(t)) found.push(`${tag}: all capitals "${t.slice(0, 30)}"`);
         if ((t.match(/·/g) || []).length > 1) found.push(`${tag}: more than two facts on a line "${t.slice(0, 50)}"`);
         if (/[›»⌄▾▸—]/.test(t)) found.push(`${tag}: a text character used as a mark "${t.slice(0, 30)}"`);
+        if (/\b(Download to|Save as a note|To a device|To another app)\b/.test(t)) found.push(`${tag}: a second name for an action "${t.slice(0, 40)}"`);
         if (/\b(planned|fixture|prototype|unavailable|TODO)\b/i.test(t)) found.push(`${tag}: roadmap or placeholder wording "${t.slice(0, 40)}"`);
       }
       el.remove();
@@ -86,8 +103,8 @@ function runChecks() {
     if (!SCREENS[p.id]) found.push(`no screen for ${p.id}`);
     if (pathTo(p.id).length > 3) found.push(`${p.id} is deeper than three levels`);
     let at = p.id, hops = 0;
-    while (at !== 'home' && hops++ < 6) at = backTarget(at);
-    if (at !== 'home') found.push(`Back from ${p.id} never reaches Home`);
+    while (at && at !== 'home' && hops++ < 6) at = backTarget(at);
+    if (at !== 'home' && !p.fromOutside) found.push(`Back from ${p.id} never reaches Home`);
     if (p.parent && !PLACE[p.parent]) found.push(`${p.id} has a parent that does not exist`);
   }
 
