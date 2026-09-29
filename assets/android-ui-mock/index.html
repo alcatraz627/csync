@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>csync phone app, full mock</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="shell-top">
+    <h1>csync phone app <small>full mock, sample data</small></h1>
+    <span class="grow"></span>
+    <span class="shell-group" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="dark">Dark</button>
+      <button type="button" data-theme-set="light">Light</button>
+      <button type="button" data-theme-set="system">System</button>
+    </span>
+    <span class="shell-group" role="group" aria-label="Text size">
+      <button type="button" data-size-set="sm">Small</button>
+      <button type="button" data-size-set="md">Medium</button>
+      <button type="button" data-size-set="lg">Large</button>
+    </span>
+    <button type="button" class="shell-btn" id="wall-toggle">Show every screen</button>
+    <button type="button" class="shell-btn" id="reset">Start over</button>
+  </header>
+
+  <div class="shell" id="one">
+    <aside class="rail" aria-label="The map">
+      <h2>Every place</h2>
+      <div class="tree" id="tree"></div>
+      <h2>Sheets on this screen</h2>
+      <div class="chips" id="sheets"></div>
+      <h2>Put the app in a state</h2>
+      <div class="chips" id="states"></div>
+    </aside>
+    <main class="stage">
+      <div class="phone" id="phone" aria-label="csync on a phone"></div>
+    </main>
+    <aside class="inspect" id="inspect" aria-label="About this screen"></aside>
+  </div>
+  <div class="gallery" id="wall" hidden></div>
+
+  <script src="model.js"></script>
+  <script src="icons.js"></script>
+  <script src="data.js"></script>
+  <script src="kit.js"></script>
+  <script src="screens.js"></script>
+  <script src="sheets.js"></script>
+  <script src="app.js"></script>
+  <script src="review.js"></script>
+  <script src="check.js"></script>
+</body>
+</html>
