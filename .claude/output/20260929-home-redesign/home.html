@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>csync Home redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0C0D11; --raise:#16181E; --raise2:#1C1F27;
+  --line:#23262F; --line2:#2C3038;
+  --text:#F5F3F1; --dim:#9298A3; --dim2:#6B7079;
+  --coral:#E4572E; --coral-soft:#F2A48C; --coral-ink:#FF6a3d;
+  --green:#39C07A;
+  --glow:rgba(228,87,46,.16);
+  --radius:20px;
+}
+:root:not([data-theme="light"]) {}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#F3F1EC; --raise:#FFFFFF; --raise2:#FBFAF7;
+    --line:#E6E2DA; --line2:#DAD5CA;
+    --text:#1A1A1E; --dim:#5D626C; --dim2:#8A8F98;
+    --glow:rgba(228,87,46,.12);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#F3F1EC; --raise:#FFFFFF; --raise2:#FBFAF7;
+  --line:#E6E2DA; --line2:#DAD5CA;
+  --text:#1A1A1E; --dim:#5D626C; --dim2:#8A8F98;
+  --glow:rgba(228,87,46,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#08090C;font-family:Inter,system-ui,sans-serif;color:var(--text);
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 16px 48px;-webkit-font-smoothing:antialiased}
+.toolbar{display:flex;gap:8px;align-items:center}
+.toolbar button{background:#16181E;color:#9298A3;border:1px solid #23262F;border-radius:999px;
+  padding:8px 14px;font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.phone{width:390px;max-width:100%;background:var(--bg);border-radius:34px;overflow:hidden;
+  border:1px solid #1c1e25;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.screen{display:flex;flex-direction:column;min-height:812px}
+
+/* status + app bar */
+.status{display:flex;justify-content:space-between;align-items:center;padding:12px 22px 2px;font-size:13px;color:var(--dim)}
+.appbar{display:flex;align-items:center;gap:10px;padding:10px 20px 4px}
+.mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(150deg,#EC6a44,#C33D18);
+  display:grid;place-items:center;color:#fff;font-weight:900;font-size:17px;letter-spacing:-.02em}
+.appbar h1{font-size:16px;font-weight:600;letter-spacing:-.01em}
+.appbar .sp{flex:1}
+.icon-btn{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:var(--dim);border:1px solid transparent}
+.icon-btn:hover{background:var(--raise);border-color:var(--line)}
+
+.body{padding:8px 18px 24px;display:flex;flex-direction:column;gap:22px}
+
+/* HERO: the hub */
+.hero{position:relative;border-radius:var(--radius);overflow:hidden;
+  background:
+    radial-gradient(120% 90% at 82% -10%, var(--glow), transparent 60%),
+    linear-gradient(180deg,var(--raise2),var(--raise));
+  border:1px solid var(--line2);padding:20px 20px 18px}
+.hero .mesh{position:absolute;right:-6px;top:-6px;width:150px;height:150px;opacity:.9}
+.hero-ey{font-size:12px;font-weight:600;color:var(--coral-soft);letter-spacing:.01em;margin-bottom:2px}
+.hero h2{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+.hero .live{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--text);font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(57,192,122,.16)}
+.dot.off{background:var(--dim2);box-shadow:none}
+.pills{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
+.pill{font-size:12.5px;font-weight:500;padding:6px 11px;border-radius:9px;border:1px solid var(--line2);
+  color:var(--text);background:rgba(255,255,255,.02);display:inline-flex;gap:6px;align-items:center}
+.pill.on{border-color:rgba(228,87,46,.5);color:var(--coral-soft)}
+.pill i{width:6px;height:6px;border-radius:50%;background:var(--coral)}
+.pill.off i{background:var(--dim2)}
+.pill.off{color:var(--dim)}
+
+/* quiet secondary device line */
+.devline{display:flex;align-items:center;gap:10px;padding:2px 4px;color:var(--dim);font-size:13.5px}
+.devline .dot{width:7px;height:7px}
+.devline b{color:var(--text);font-weight:600}
+.devline .go{margin-left:auto;color:var(--dim2);font-size:12.5px}
+
+/* section label, quiet, sentence case */
+.label{font-size:14px;font-weight:600;color:var(--text);margin:2px 2px 12px;letter-spacing:-.01em}
+.label span{color:var(--dim2);font-weight:400}
+
+/* continue: featured wide */
+.continue{display:flex;gap:14px;align-items:center;background:var(--raise);border:1px solid var(--line);
+  border-radius:16px;padding:12px;cursor:pointer}
+.continue .thumb{width:56px;height:56px;border-radius:12px;flex:none;
+  background:linear-gradient(140deg,#2a2018,#191b21);display:grid;place-items:center;color:var(--coral)}
+.continue .meta{flex:1;min-width:0}
+.continue .meta b{font-size:14.5px;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.continue .meta small{color:var(--dim);font-size:12.5px}
+.continue .bar{height:3px;border-radius:2px;background:var(--line2);margin-top:8px;overflow:hidden}
+.continue .bar i{display:block;height:100%;width:62%;background:var(--coral)}
+.continue .play{width:36px;height:36px;border-radius:50%;background:var(--coral);color:#fff;display:grid;place-items:center;flex:none}
+
+/* capabilities: quiet compact grid */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cap{background:var(--raise);border:1px solid var(--line);border-radius:14px;padding:13px 13px 14px;cursor:pointer;position:relative}
+.cap:hover{border-color:var(--line2)}
+.cap .ico{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:var(--coral);
+  background:rgba(228,87,46,.12);margin-bottom:9px}
+.cap b{font-size:14px;font-weight:600;display:block}
+.cap small{font-size:12px;color:var(--dim)}
+.cap .s{position:absolute;top:14px;right:14px;width:7px;height:7px;border-radius:50%;background:var(--green)}
+.cap .s.off{background:var(--dim2)}
+
+/* bottom nav */
+.nav{margin-top:auto;display:flex;justify-content:space-around;align-items:center;padding:12px 24px 20px;border-top:1px solid var(--line)}
+.nav a{color:var(--dim2);width:44px;height:38px;display:grid;place-items:center;border-radius:12px}
+.nav a.on{color:var(--coral);background:rgba(228,87,46,.12)}
+svg{display:block}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <button onclick="document.documentElement.setAttribute('data-theme','dark')">Dark</button>
+  <button onclick="document.documentElement.setAttribute('data-theme','light')">Light</button>
+  <button onclick="document.documentElement.removeAttribute('data-theme')">System</button>
+</div>
+<div class="phone"><div class="screen">
+  <div class="status"><span>9:41</span><span>&#9679;&#9679;&#9679; &#9646;</span></div>
+  <div class="appbar">
+    <div class="mark">c</div>
+    <h1>Home</h1>
+    <div class="sp"></div>
+    <div class="icon-btn" title="Search">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- HERO: the hub -->
+    <div class="hero">
+      <svg class="mesh" viewBox="0 0 150 150" fill="none">
+        <g stroke="#E4572E" stroke-width="1.4" opacity=".55">
+          <path d="M75 75 L75 34"/><path d="M75 75 L38 96"/><path d="M75 75 L112 96"/><path d="M75 75 L116 52"/>
+        </g>
+        <circle cx="75" cy="32" r="6" fill="#E4572E"/>
+        <circle cx="37" cy="98" r="5" fill="#F2A48C"/>
+        <circle cx="114" cy="98" r="5" fill="#F2A48C"/>
+        <circle cx="118" cy="50" r="4.5" fill="#6B7079"/>
+        <circle cx="75" cy="75" r="11" fill="#E4572E"/>
+        <circle cx="75" cy="75" r="4" fill="#0C0D11"/>
+      </svg>
+      <div class="hero-ey">Your hub</div>
+      <h2>Raspberry&nbsp;Pi</h2>
+      <div class="live"><span class="dot"></span> Reachable now over Tailscale</div>
+      <div class="pills">
+        <span class="pill on"><i></i>Media</span>
+        <span class="pill on"><i></i>Assistant</span>
+        <span class="pill on"><i></i>Camera</span>
+        <span class="pill on"><i></i>Screen</span>
+      </div>
+    </div>
+
+    <!-- quiet other device -->
+    <div class="devline"><span class="dot off"></span><b>Mac</b>&nbsp;sharing receiver, offline<span class="go">Set up &#8250;</span></div>
+
+    <!-- continue -->
+    <div>
+      <div class="label">Pick up <span>where you left off</span></div>
+      <div class="continue">
+        <div class="thumb">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div class="meta">
+          <b>F-Droid 2.0 - The Biggest Update</b>
+          <small>YouTube on Pi screen &middot; 6:29 left</small>
+          <div class="bar"><i></i></div>
+        </div>
+        <div class="play"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+      </div>
+    </div>
+
+    <!-- capabilities -->
+    <div>
+      <div class="label">Do something</div>
+      <div class="grid">
+        <div class="cap"><div class="s"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M15 13l6 4-6 4z"/></svg></div><b>Media</b><small>121 files ready</small></div>
+        <div class="cap"><div class="s"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg></div><b>Chat</b><small>Assistant ready</small></div>
+        <div class="cap"><div class="s"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><circle cx="12" cy="12.5" r="3.4"/></svg></div><b>Camera</b><small>Live preview</small></div>
+        <div class="cap"><div class="s off"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div><b>Share</b><small>Choose a device</small></div>
+        <div class="cap"><div class="s"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h9l3 3v15H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></div><b>Notes</b><small>Saved on the Pi</small></div>
+        <div class="cap"><div class="s"></div><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg></div><b>Pi display</b><small>Screen and playback</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav">
+    <a class="on" title="Home"><svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l9 8h-3v9h-4v-6H10v6H6v-9H3z"/></svg></a>
+    <a title="Media"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M15 14l5 3.5-5 3.5z"/></svg></a>
+    <a title="Share"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 11l8-4M8 13l8 4"/></svg></a>
+    <a title="Chat"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg></a>
+    <a title="More"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></a>
+  </div>
+</div></div>
+</body>
+</html>
