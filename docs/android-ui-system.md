@@ -85,12 +85,12 @@ accent, is where the hierarchy comes from.
 | Icon tile in a row | 38 square, corner 11 |
 | Group of rows | corner 16, one border, dividers between rows |
 | Tile | corner 14 |
-| Button | 44 tall, corner 13 |
-| Icon button | 40 square |
+| Button | 48 tall, corner 14 |
+| Icon button | 48 square, the icon inside is 17 to 23 |
 | Top bar | 52 tall, always |
 | Bottom bar | 62 tall |
 | Sheet | top corners 24, at most 82 percent of the screen |
-| Smallest thing that can be tapped | 34, checked by `runChecks()` |
+| Smallest thing that can be tapped | 48 by 48 (G-25), checked by `runChecks()` |
 
 ## Parts
 
@@ -128,7 +128,7 @@ by `runChecks()` in the mock.
 - More than two facts on one line.
 - A value that was not measured, shown as a dash or as "unavailable".
 - The words planned, prototype or fixture.
-- A button with no spoken name, or smaller than 34.
+- A button with no spoken name, or smaller than 48 by 48.
 - Two primary actions on one page.
 - A path that does not fit the top bar, or a top bar that is not 52 tall.
 - Anything wider than the phone.

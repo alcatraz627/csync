@@ -53,7 +53,7 @@ function runChecks() {
         const name = (b.getAttribute('aria-label') || b.innerText).trim();
         if (!name) found.push(`${tag}: a button has no name`);
         const r = b.getBoundingClientRect();
-        if (r.height && r.height < 33.5) found.push(`${tag}: "${name.slice(0, 30)}" is only ${Math.round(r.height)}px tall`);
+        if (r.height && (r.height < 47.5 || r.width < 47.5)) found.push(`${tag}: "${name.slice(0, 30)}" is ${Math.round(r.width)} by ${Math.round(r.height)}, under 48`);
         if (b.classList.contains('btn') && !b.querySelector('svg')) found.push(`${tag}: button "${name}" has no icon`);
       }
       for (const b of el.querySelectorAll('.seg button')) if (!b.querySelector('svg')) found.push(`${tag}: a tab has no icon`);
