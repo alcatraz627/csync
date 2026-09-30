@@ -1,182 +1,73 @@
-// csync phone app: every page, state and transition, as a graph.
-// Render: dot -Tsvg docs/android-app-graph.dot -o docs/android-app-graph.svg
-// Read from the code on 2026-10-01 (csync-hub 2.46).
-// A line with arrows at both ends is a parent and its child: the label at the child end is the
-// tap that opens it, and Back always returns along the same line. A single arrow is a move that
-// Back does not reverse. Dashed pills are sheets (Back closes them). Dotted arrows come from
-// outside the app or from the Pi's own state.
+// csync phone app, as three small graphs. Render each:
+//   dot -Tsvg -Gcharset=utf8 docs/android-app-graph.dot -o docs/android-app-graph.svg   (all three on one sheet)
+// Read from the code on 2026-10-01 (csync-hub 2.46). Names only; what each page holds is in
+// android-app-tree.md, and the model is android-app-model.md.
 digraph csync {
-  graph [rankdir=LR, newrank=true, compound=true, fontname="Helvetica", fontsize=11, splines=true,
-         nodesep=0.3, ranksep=0.6, bgcolor="#f4f1ea", pad=0.4, labelloc=t,
-         label="csync phone app: pages, states and transitions (2.46)\nDouble-headed line = parent and child; the label is the tap that opens the child, Back returns along it.\nFrom anywhere: the BOTTOM BAR opens Home, Media, Share, Chat or More; the QUICK RAIL (top corners) opens whichever pages and actions the owner picked in Settings.\n"];
-  node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#ffffff", color="#5c5346", penwidth=1.2];
-  edge  [fontname="Helvetica", fontsize=8.5, color="#5c5346", arrowsize=0.7];
+  graph [rankdir=TB, newrank=true, fontname="Helvetica", fontsize=11, splines=true, nodesep=0.25, ranksep=0.45,
+         bgcolor="#f4f1ea", pad=0.4, labelloc=t, label="csync phone app (2.46)\n"];
+  node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#ffffff", color="#5c5346", penwidth=1.1, margin="0.12,0.05"];
+  edge  [fontname="Helvetica", fontsize=8, color="#5c5346", arrowsize=0.6];
 
-  subgraph cluster_home {
-    label="HOME  (bar place 1)"; style="rounded,filled"; fillcolor="#fbe9dc"; color="#d9541e"; fontsize=12;
-    Home   [label="Home\nstates: Pi online · Pi offline · not connected\nPick up · Play Ask Send Camera · Your devices · status line\nBack (gesture): leaves the app"];
-    Search [label="Search\nscopes: All · Media · Chats · Files · Devices\nstates: nothing typed · searching · N results\nnothing matches · Pi unreachable"];
-    DevicesSheet [label="Your devices (sheet)\nevery peer, Online or Offline", style="rounded,dashed,filled", fillcolor="#fff8f2"];
-    Home -> Search [dir=both, label="search icon"];
-    Home -> DevicesSheet [dir=both, label="devices row"];
+  // ================= 1. THE MAP: places and their parents. Down = the tap; Back = the same line up. =================
+  subgraph cluster_map {
+    label="1 · THE MAP   (a line down is the tap that opens a child; Back climbs the same line)"; style="rounded,filled"; fillcolor="#ffffff"; color="#5c5346"; fontsize=12;
+    Bar [label="BOTTOM BAR", shape=box, style="filled", fillcolor="#2b2620", fontcolor="#ffffff", color="#2b2620"];
+    Home [fillcolor="#fbe9dc"]; Media [fillcolor="#e3eef7"]; Share [fillcolor="#e6f2e4"]; Chat [fillcolor="#f3e8f5"]; More [fillcolor="#f1efe9"];
+    Bar -> Home; Bar -> Media; Bar -> Share; Bar -> Chat; Bar -> More;
+
+    Home -> Search [label="search icon"];
+    Media -> PiScreen [label="Pi screen row\nmini player"]; Media -> ThisPhone [label="Play on this phone"];
+    PiScreen [label="Pi screen"]; ThisPhone [label="This phone"];
+    PiScreen -> FullScreen [label="tap the film"]; FullScreen [label="Full screen"];
+    Share -> Received [label="Received"]; Share -> FromApp [label="(from Android's share sheet)", style=dotted]; FromApp [label="From another app"];
+    Chat -> Conversation [label="row · new"];
+    More -> Camera [label="Pi camera"]; Camera -> Captures;
+    More -> Notes; Notes -> Note; Notes -> Pin; Note -> NoteEdit [label="edit"]; NoteEdit [label="Note edit"];
+    More -> Tools; Tools -> Process [label="Process monitor"]; Process [label="Process monitor"]; Tools -> Widgets;
+    More -> Settings; Settings -> Connection;
+    More -> Guide [label="Assistant guide"]; Guide [label="Assistant guide"];
+    More -> Help [label="Help and about"]; Help [label="Help and about"]; Help -> Design [label="Design system"]; Design [label="Design system"];
+    { rank=same; Home; Media; Share; Chat; More; }
   }
 
-  subgraph cluster_media {
-    label="MEDIA  (bar place 2)"; style="rounded,filled"; fillcolor="#e3eef7"; color="#2f6ea3"; fontsize=12;
-    Media [label="Media\nviews: Files · Videos · History · Access\nFiles: drives · folder (Up row, Load more) · empty · unreadable\nfoot: Pi screen row when idle, mini player when playing\nfolder rows open in place; Back never walks folders"];
-    ItemSheet [label="Item sheet (model §7a)\nPlay on Pi · Play here · Show on Pi · Open · VLC · Set as cover\nSend to device · to conversation · Add to note · Pin · Save · Share", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    FolderSheet [label="Folder sheet\nOpen · Slideshow · Copy path", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    ResumeSheet [label="Resume sheet\nResume on Pi · Start over · the other output", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    SourceSheet [label="Switch source (sheet)", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    PiScreen [label="Pi screen page\nshows whatever state the Pi reports (below)\nidle: From the Pi · From this phone · This screen\nplaying: seek · pause · skip · stop · Volume Speed Rotate Loop\nshowing: Stop showing; document: Previous · Page N of M · Next\nlandscape: picture left, controls right", penwidth=2, color="#2f6ea3"];
-    ThisPhone [label="This phone page\nidle · loading · playing · paused · finished · failed\nplayback notification survives the page"];
-    FullScreen [label="Full screen video\n(a mode of the player)"];
-    CoverSheet [label="Cover image (sheet)\nFit · Rotate · Choose", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    DisplaySheet [label="Display (sheet)\nname · rotate · starting volume · sound", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    PiSources [label="Source sheets\nslideshow (folder, seconds) · a note (pick) · a link (field) · skip length", style="rounded,dashed,filled", fillcolor="#f3f8fc"];
-    Media -> ItemSheet [dir=both, label="file row"];
-    Media -> FolderSheet [dir=both, label="folder's three lines"];
-    Media -> ResumeSheet [dir=both, label="History row"];
-    Media -> SourceSheet [dir=both, label="Switch source"];
-    Media -> PiScreen [dir=both, label="Pi screen row · mini player row", penwidth=1.6];
-    Media -> ThisPhone [dir=both, label="(from an item) Play on this phone"];
-    ItemSheet -> PiScreen [label="Play on Pi · Show on Pi", color="#2f6ea3"];
-    ItemSheet -> ThisPhone [label="Play on this phone", color="#2f6ea3"];
-    ResumeSheet -> PiScreen [label="Resume on Pi", color="#2f6ea3"];
-    PiScreen -> FullScreen [dir=both, label="tap the picture (film)"];
-    PiScreen -> CoverSheet [dir=both, label="Cover image"];
-    PiScreen -> DisplaySheet [dir=both, label="Display"];
-    PiScreen -> PiSources [dir=both, label="Photos as a slideshow · A note · A link · skip length"];
-    PiScreen -> Media [label="Browse Media", color="#2f6ea3"];
-
-    subgraph cluster_pistates {
-      label="Pi screen states, from /v1/player/pi (Home's status line, Media's foot row, the widget and the tile follow the same)";
-      style="rounded,dashed"; color="#2f6ea3"; fontsize=10;
-      node [shape=ellipse, fillcolor="#eef5fb"];
-      S_idle [label="idle\ncover shown"];
-      S_loading [label="loading / buffering"];
-      S_playing [label="playing"];
-      S_paused [label="paused"];
-      S_finished [label="finished"];
-      S_showing [label="showing\nimage · text · slideshow · document\nPi camera · this phone's screen"];
-      S_offline [label="offline / failed"];
-      S_idle -> S_loading [label="Play: item · link · uploaded file"];
-      S_loading -> S_playing;
-      S_playing -> S_paused [label="Pause"]; S_paused -> S_playing [label="Resume"];
-      S_playing -> S_finished [label="film ends"]; S_finished -> S_idle [label="cover returns"];
-      S_playing -> S_idle [label="Stop"]; S_paused -> S_idle [label="Stop"];
-      S_idle -> S_showing [label="Show: picture · text · slideshow\nnote · document · camera · phone screen"];
-      S_showing -> S_idle [label="Stop showing\nphone ends its share"];
-      S_showing -> S_showing [label="Next / Previous page\npause holds a slideshow"];
-      S_showing -> S_loading [label="Play replaces it"]; S_playing -> S_showing [label="Show replaces it"];
-      S_idle -> S_offline [label="Pi unreachable", style=dotted]; S_offline -> S_idle [label="reachable", style=dotted];
-    }
-    PiScreen -> S_idle [label="Stop · Stop showing", color="#2f6ea3"];
-    PiScreen -> S_showing [label="The Pi camera · This phone's screen (Android asks)\nslideshow · note · picture or PDF", color="#2f6ea3"];
-    PiScreen -> S_loading [label="a link · a video or song from this phone", color="#2f6ea3"];
+  // ================= 2. THE PI SCREEN: what the Pi reports, and what moves it =================
+  subgraph cluster_pi {
+    label="2 · THE PI SCREEN   (every page that shows the Pi follows this)"; style="rounded,filled"; fillcolor="#e3eef7"; color="#2f6ea3"; fontsize=12;
+    node [shape=ellipse, fillcolor="#ffffff"];
+    S_idle [label="idle\n(cover)"]; S_loading [label="loading"]; S_playing [label="playing"]; S_paused [label="paused"];
+    S_finished [label="finished"]; S_showing [label="showing"]; S_offline [label="offline"];
+    S_idle -> S_loading [label="Play"]; S_loading -> S_playing;
+    S_playing -> S_paused [label="Pause"]; S_paused -> S_playing [label="Resume"];
+    S_playing -> S_finished [label="film ends"]; S_finished -> S_idle;
+    S_playing -> S_idle [label="Stop"]; S_paused -> S_idle [label="Stop"];
+    S_idle -> S_showing [label="Show"]; S_showing -> S_idle [label="Stop showing"];
+    S_showing -> S_showing [label="page turn"]; S_showing -> S_loading [label="Play"]; S_playing -> S_showing [label="Show"];
+    S_idle -> S_offline [style=dotted, label="unreachable"]; S_offline -> S_idle [style=dotted];
+    Shows [label="Show = picture · text · slideshow · note · document\nPi camera · this phone's screen", shape=note, fillcolor="#ffffff"];
+    Plays [label="Play = a drive file · a link · a file from this phone", shape=note, fillcolor="#ffffff"];
+    Shows -> S_showing [style=invis]; Plays -> S_loading [style=invis];
   }
 
-  subgraph cluster_share {
-    label="SHARE  (bar place 3)"; style="rounded,filled"; fillcolor="#e6f2e4"; color="#3a7d44"; fontsize=12;
-    Share [label="Share (compose)\nrecipient Online or Offline · composing · sending\nsent rows Delivered or Failed\nAttach a file · Use the clipboard · Send"];
-    Received [label="Received\nnewest first · N items · empty"];
-    RecipientSheet [label="Choose who receives (sheet)", style="rounded,dashed,filled", fillcolor="#f2f8f1"];
-    FromApp [label="From another app (own screen)\nvideo · audio · image · PDF · file · text · link · YouTube · several\nchoosing · sending · not shown (retry) · connect the Pi first\nBack: returns to the sharing app"];
-    Share -> Received [dir=both, label="Received (top bar)"];
-    Share -> RecipientSheet [dir=both, label="recipient row"];
-    Received -> ItemSheet [label="item row", color="#3a7d44"];
-    FromApp -> RecipientSheet [label="Send to a device", color="#3a7d44"];
+  // ================= 3. THE CROSSINGS: moves between places that Back does not reverse =================
+  subgraph cluster_cross {
+    label="3 · THE CROSSINGS   (single arrows; Back does not reverse these)"; style="rounded,filled"; fillcolor="#ffffff"; color="#8a3c1a"; fontsize=12;
+    node [fillcolor="#fff6f0"];
+    edge [color="#8a3c1a"];
+    X_Home [label="Home"]; X_Search [label="Search"]; X_Item [label="Item sheet\n(any item, anywhere)", style="rounded,dashed,filled"];
+    X_Pi [label="Pi screen"]; X_Phone [label="This phone"]; X_Media [label="Media"]; X_Share [label="Share"]; X_Received [label="Received"];
+    X_From [label="From another app"]; X_Conv [label="Conversation"]; X_Note [label="Note edit"]; X_Pin [label="Pin"];
+    X_Camera [label="Pi camera"]; X_Tools [label="Tools"];
+    X_Home -> X_Media [label="Play tile"]; X_Home -> X_Conv [label="Ask tile · Pick up"]; X_Home -> X_Share [label="Send tile"];
+    X_Home -> X_Camera [label="Camera tile"]; X_Home -> X_Tools [label="status line"]; X_Home -> X_Pi [label="Pick up"];
+    X_Search -> X_Item [label="media result"]; X_Search -> X_Conv [label="chat result"]; X_Search -> X_Received [label="file result"];
+    X_Item -> X_Pi [label="Play / Show on Pi"]; X_Item -> X_Phone [label="Play here"]; X_Item -> X_From [label="Send to a device"];
+    X_Item -> X_Conv [label="Send to a conversation"]; X_Item -> X_Note [label="Add to a note"]; X_Item -> X_Pin [label="Save as a pin"];
+    X_From -> X_Pi [label="Play / Show"]; X_From -> X_Conv; X_From -> X_Note; X_From -> X_Pin;
+    X_Pi -> X_From [label="A file from this phone"]; X_Pi -> X_Media [label="Browse Media"];
+    Outside [label="OUTSIDE: shortcuts · widgets · tiles · share menu · notifications", shape=note, fillcolor="#ebebeb"];
+    Outside -> X_Conv [style=dotted, label="New chat · Ask the Pi · reply"]; Outside -> X_Share [style=dotted, label="Send"];
+    Outside -> X_Camera [style=dotted, label="Camera · glance · tile"]; Outside -> X_Pi [style=dotted, label="Media remote · Send to Pi screen"];
+    Outside -> X_Tools [style=dotted, label="Pi status"]; Outside -> X_From [style=dotted, label="csync · last device"];
+    Outside -> X_Phone [style=dotted, label="playback"];
   }
-
-  subgraph cluster_chat {
-    label="CHAT  (bar place 4)"; style="rounded,filled"; fillcolor="#f3e8f5"; color="#7b4b8c"; fontsize=12;
-    Chat [label="Chat list\nviews: All · Favorites · Archived · Tools\nlist · searching · empty · Pi unreachable"];
-    Conversation [label="Conversation\nreading · typing (heading folds) · reply being written (Send = Stop)\njump row · renaming · find open · suggestions open\nBack closes find or suggestions first"];
-    ChatSheets [label="Sheets\nattach (file · photo · Pi file) · model and effort · fork", style="rounded,dashed,filled", fillcolor="#f8f2f9"];
-    Chat -> Conversation [dir=both, label="row · new conversation", penwidth=1.6];
-    Conversation -> ChatSheets [dir=both, label="plus · model chip · fork"];
-    Conversation -> ItemSheet [label="a message's file", color="#7b4b8c"];
-  }
-
-  subgraph cluster_more {
-    label="MORE  (bar place 5)"; style="rounded,filled"; fillcolor="#f1efe9"; color="#6b6252"; fontsize=12;
-    More [label="More\nOn the Pi · Looking after things · Reference"];
-    Camera [label="Pi camera\nlive preview · no camera · Pi offline · recording\ntake photo · record · Show on Pi screen"];
-    Captures [label="Captures\ngrouped by day · empty"];
-    Notes [label="Notes (own screen)\nviews: Notes · Pins\nlist · searching · empty · Pi unreachable"];
-    Note [label="Note (read)\nfiles under In this note · pictures"];
-    NoteEdit [label="Note edit\nSave (body and top bar) · Add to this note"];
-    Pin [label="Pin (read / edit)\nLink and Text fields"];
-    Tools [label="Tools\nlead: Everything is ready · One thing needs a look · Power is low\nThe Pi cannot be reached · not connected\nRaspberry Pi · This phone · This app (update row) · pull to refresh"];
-    Process [label="Process monitor\nreadings rows, or Open Shizuku"];
-    Widgets [label="Widgets\nlauncher widgets · Quick Settings tiles · share menu entries\nAdded or Not added"];
-    Settings [label="Settings\nConnection row · Playback · Assistant\nAppearance: Theme · Text size · Colour · Icon · Quick rail\nsections fold in place, changes apply at once"];
-    Connection [label="Connection\naddresses · token · Receive on this phone · phone name"];
-    Guide [label="Assistant guide"];
-    Help [label="Help and about\nversion"];
-    Design [label="Design system\nevery kit part drawn once"];
-    RailSheet [label="Quick rail (sheets)\nbar 1: pick and order from the catalog\nright button: pick one", style="rounded,dashed,filled", fillcolor="#f8f6f1"];
-    More -> Camera [dir=both, label="Pi camera"];
-    Camera -> Captures [dir=both, label="Captures (row or top bar)"];
-    More -> Notes [dir=both, label="Notes"];
-    Notes -> Note [dir=both, label="note row"];
-    Notes -> Pin [dir=both, label="pin row (Pins view)"];
-    Note -> NoteEdit [dir=both, label="edit · Save"];
-    Notes -> NoteEdit [label="plus (new note)"];
-    More -> Tools [dir=both, label="Tools"];
-    Tools -> Process [dir=both, label="Process monitor"];
-    Tools -> Widgets [dir=both, label="Widgets"];
-    More -> Settings [dir=both, label="Settings"];
-    Settings -> Connection [dir=both, label="Connection row"];
-    Settings -> RailSheet [dir=both, label="Quick rail rows"];
-    Settings -> DisplaySheet [dir=both, label="Display"];
-    More -> Guide [dir=both, label="Assistant guide"];
-    More -> Help [dir=both, label="Help and about"];
-    Help -> Design [dir=both, label="Design system"];
-    Captures -> ItemSheet [label="item row (plus Delete)", color="#6b6252"];
-    Note -> ItemSheet [label="a file in the note", color="#6b6252"];
-  }
-
-  // ---------- moves that cross the bar places (Back does not reverse these) ----------
-  edge [color="#8a3c1a"];
-  Home -> Media [label="Play tile"];
-  Home -> Conversation [label="Ask tile (new) · Pick up row"];
-  Home -> Share [label="Send tile"];
-  Home -> Camera [label="Camera tile"];
-  Home -> Tools [label="status line"];
-  Home -> PiScreen [label="Pick up: last played on the Pi"];
-  Search -> ItemSheet [label="media result"];
-  Search -> Conversation [label="chat result"];
-  Search -> Received [label="file result"];
-  Search -> DevicesSheet [label="device result"];
-  ItemSheet -> FromApp [label="Send to a device"];
-  ItemSheet -> Conversation [label="Send to a conversation"];
-  ItemSheet -> NoteEdit [label="Add to a note"];
-  ItemSheet -> Pin [label="Save as a pin"];
-  PiScreen -> FromApp [label="A file: a picture or PDF from this phone"];
-  FromApp -> PiScreen [label="Play / Show on Pi screen"];
-  FromApp -> Conversation [label="Send to a conversation"];
-  FromApp -> NoteEdit [label="Add to a note"];
-  FromApp -> Pin [label="Save as a pin"];
-  Camera -> S_showing [label="Show on Pi screen"];
-  Note -> S_showing [label="Show on Pi screen"];
-  Media -> Home [label="Back (gesture) from any bar root", style=dashed, color="#9a9083"];
-
-  // ---------- in from outside ----------
-  subgraph cluster_outside {
-    label="OUTSIDE THE APP"; style="rounded,filled"; fillcolor="#ebebeb"; color="#888888"; fontsize=12;
-    node [shape=note, fillcolor="#ffffff"];
-    Shortcuts [label="Launcher shortcuts\nNew chat · Send · Camera"];
-    WidgetsOut [label="Home-screen widgets\nMedia remote (Pause, Stop in place) · Pi status\nCamera glance · Ask the Pi · xkcd (opens the browser)"];
-    Tiles [label="Quick Settings tiles\nPi screen (stops what plays, else Media)\nPi camera · Clipboard and Last photo (send in place)"];
-    ShareMenu [label="Android share menu\ncsync · Send to Pi screen · Send to your last device"];
-    Notifs [label="Notifications\nchat reply (reply stays there) · playback · screen share Stop"];
-  }
-  edge [style=dotted, color="#444444"];
-  Shortcuts -> Conversation [label="New chat"]; Shortcuts -> Share [label="Send"]; Shortcuts -> Camera [label="Camera"];
-  WidgetsOut -> PiScreen [label="Media remote"]; WidgetsOut -> Tools [label="Pi status"];
-  WidgetsOut -> Camera [label="Camera glance"]; WidgetsOut -> Conversation [label="Ask the Pi (new)"];
-  Tiles -> S_idle [label="Pi screen: stop"]; Tiles -> Media [label="Pi screen: open"]; Tiles -> Camera [label="Pi camera"];
-  ShareMenu -> FromApp [label="csync · Send to your last device"]; ShareMenu -> PiScreen [label="Send to Pi screen: plays or shows at once"];
-  Notifs -> Conversation [label="chat reply"]; Notifs -> ThisPhone [label="playback"]; Notifs -> S_idle [label="screen share Stop"];
 }
