@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -192,9 +194,47 @@ func listModels(key string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+	// Gemini answers a bad key with 400 on this plain list call, not only 401 or 403.
+	if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return "", errKeyRejected
+	}
 	raw, _ := io.ReadAll(resp.Body)
 	return string(raw), nil
 }
+
+// listGeminiChatModels names the Gemini models this key can chat with, leaving
+// out the embedding, speech, image and live-audio ones.
+func listGeminiChatModels(key string) ([]string, error) {
+	raw, err := listModels(key)
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Models []struct {
+			Name    string   `json:"name"`
+			Methods []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, m := range list.Models {
+		id := strings.TrimPrefix(m.Name, "models/")
+		if !strings.HasPrefix(id, "gemini") || geminiNotChat.MatchString(id) {
+			continue
+		}
+		for _, method := range m.Methods {
+			if method == "generateContent" {
+				ids = append(ids, id)
+				break
+			}
+		}
+	}
+	return ids, nil
+}
+
+var geminiNotChat = regexp.MustCompile(`embedding|tts|image|audio|live|robotics|computer-use|transcribe|customtools`)
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

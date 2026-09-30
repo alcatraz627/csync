@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -93,11 +94,7 @@ func serve() error {
 		if !authed(w, r, token) {
 			return
 		}
-		providers := loadProviders()
-		for i := range providers {
-			providers[i].ChatSupported = chatProviderSupported(providers[i].ID)
-		}
-		writeJSON(w, map[string]any{"providers": providers, "active": loadAssistConfig()})
+		writeJSON(w, map[string]any{"providers": providersForApp(), "active": loadAssistConfig()})
 	})
 	mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
@@ -108,8 +105,9 @@ func serve() error {
 			http.Error(w, "need JSON {provider, model, effort}", http.StatusBadRequest)
 			return
 		}
+		c.Provider = providerForModel(c.Model, c.Provider)
 		if !chatProviderSupported(c.Provider) {
-			http.Error(w, c.Provider+" provider is not available for chat", http.StatusBadRequest)
+			http.Error(w, c.Provider+" has no key on this Pi, so it cannot chat yet", http.StatusBadRequest)
 			return
 		}
 		if err := saveAssistConfig(c); err != nil {
@@ -166,10 +164,13 @@ func serve() error {
 		if req.Effort != "" {
 			cfg.Effort = req.Effort
 		}
+		// The model decides the provider, so a conversation can use any provider's model.
+		cfg.Provider = providerForModel(cfg.Model, cfg.Provider)
 		if !chatProviderSupported(cfg.Provider) {
-			http.Error(w, cfg.Provider+" provider is selected but not yet wired; choose Gemini in Settings", http.StatusNotImplemented)
+			http.Error(w, cfg.Provider+" has no key on this Pi, so "+cfg.Model+" cannot be used yet", http.StatusNotImplemented)
 			return
 		}
+		run := chatRunners[cfg.Provider]
 		key, err := providerKey(cfg.Provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -191,7 +192,7 @@ func serve() error {
 					flusher.Flush()
 				}
 			}
-			turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history, emit)
+			turns, err := run(key, cfg.Model, cfg.Effort, systemPrompt(), history, emit)
 			reply := finalText(turns)
 			if reply != "" {
 				sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
@@ -207,7 +208,7 @@ func serve() error {
 			return
 		}
 
-		turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(), history, nil)
+		turns, err := run(key, cfg.Model, cfg.Effort, systemPrompt(), history, nil)
 		reply := finalText(turns)
 		if reply != "" {
 			sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
@@ -348,11 +349,16 @@ func cmdAsk(args []string) error {
 		return fmt.Errorf("usage: csync-assist ask \"<message>\"")
 	}
 	cfg := loadAssistConfig()
+	// ask --model <id> "<message>" tries one model without changing the saved choice.
+	if len(args) >= 3 && args[0] == "--model" {
+		cfg.Model, args = args[1], args[2:]
+	}
+	cfg.Provider = providerForModel(cfg.Model, cfg.Provider)
 	key, err := providerKey(cfg.Provider)
 	if err != nil {
 		return err
 	}
-	turns, err := runChat(key, cfg.Model, cfg.Effort, systemPrompt(),
+	turns, err := chatRunners[cfg.Provider](key, cfg.Model, cfg.Effort, systemPrompt(),
 		[]gContent{{Role: "user", Parts: []gPart{{Text: args[0]}}}}, nil)
 	if err != nil {
 		return err
@@ -371,14 +377,12 @@ func cmdAsk(args []string) error {
 }
 
 func cmdModels() error {
-	key, err := geminiKey()
-	if err != nil {
-		return err
+	for _, p := range providersForApp() {
+		if !p.ChatSupported {
+			fmt.Printf("%s: %s\n", p.Label, p.Reason)
+			continue
+		}
+		fmt.Printf("%s (%d): %s\n", p.Label, len(p.Models), strings.Join(p.Models, ", "))
 	}
-	out, err := listModels(key)
-	if err != nil {
-		return err
-	}
-	fmt.Println(out)
 	return nil
 }
