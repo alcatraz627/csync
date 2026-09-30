@@ -21,6 +21,28 @@ This runbook covers the deployed Pi media service and Android Media screen as of
 
 The Android Media screen uses the same token as the mesh peer. It browses and plays without Chat. `PhonePlaybackService` owns phone playback after the Media screen closes and polls the same command queue used by the assistant. It keeps video on a separate Android presentation display while the phone shows other tabs. Mirrored HDMI needs the Media screen visible for full-screen video. Pi playback uses mpv on the Pi's DRM output. The Camera tab subscribes to the Pi stream only while the tab is visible and polls recording state while open.
 
+## Screen, slideshow, note files and screens
+
+These routes use the same `X-Csync-Token` header as the rest of the media API. Errors carry `code` and `message`, plus `field` when one input was wrong.
+
+| Route | What it does |
+| --- | --- |
+| `POST /v1/display/show` with an `image/*` body | Shows a JPEG, PNG, WebP, GIF or BMP of up to 10 MB now. The saved cover is not changed. An optional `?name=` labels it in the player state. |
+| `POST /v1/display/show` with JSON `{"text", "title"?}` | Shows up to 4000 characters in large monospace type over black. The type shrinks until the text fits, down to a floor of about 12 lines on the screen; past that the text is cut after the last whole word, with no ellipsis. |
+| `POST /v1/display/slideshow` with `{"driveId", "path", "seconds"?}` | Loops the pictures directly inside a drive folder in name order, 3 to 60 seconds each (default 8), up to 1000 pictures. An empty folder returns 400 `SLIDESHOW_EMPTY`. |
+| `POST /v1/notes/{id}/files?name=` | Keeps any file of up to 20 MB with a note. The body is the raw file and `Content-Type` is its type. Returns `{"file": {"id", "name", "mime", "size"}}`. |
+| `GET /v1/notes/{id}/files` and `GET /v1/notes/{id}` | List a note's files. A single note now also carries a `files` list; `images` and its routes are unchanged. |
+| `GET /v1/notes/{id}/files/{fileId}` | Downloads a file with its stored type and an `attachment` filename. |
+| `DELETE /v1/notes/{id}/files/{fileId}` | Takes a file out of a note. Deleting the note removes all of its files. |
+| `GET /v1/displays` | Lists every screen the Pi has seen, plugged in or not, with its settings, and `current` for the one in use. |
+| `PUT /v1/displays/{id}` with `{"name"?, "settings"?}` | Saves a name and any of `rotate` (0, 90, 180, 270), `startVolume` (0 to 100) and `sound` (`display`, `headphones`). Returns `{"display": {...}}`. |
+
+Show and slideshow return `{"shown": true, "sentToDisplay", "player"}`. While something is up, the Pi player reports `state: "showing"`, a `kind` of `image`, `text` or `slideshow`, a `name`, and a `count` for a slideshow. Stop returns the screen to the cover, and any playback replaces what is showing. Pause holds a slideshow on its current photo (`paused: true`). Seek, speed and loop return 409 `NOT_PLAYING` while showing.
+
+A screen's id comes from its EDID maker, model and serial (`edid-…`). A screen without EDID, like HDMI0 today, is keyed by its port and first listed mode (`port-HDMI-A-1-1920x1080`). A screen seen for the first time keeps the old playback defaults of volume 0 and no rotation. Playback, shown pictures and slideshows use the rotation of the screen in use, and playback starts at its volume. The `sound` setting is stored but not applied yet, because the service has no way to choose an audio device.
+
+Note files are stored under `/home/alcatraz627/.local/state/csync/note-files/<note id>/`, named by file id. Shown pictures are `display-show.<ext>` and the text background is `display-blank.png` in the same state folder.
+
 ## Check a report of no video
 
 1. Run `ssh 100.65.188.9 'systemctl --user is-active csync-media.service; cat /sys/class/drm/card1-HDMI-A-1/status; wc -c /sys/class/drm/card1-HDMI-A-1/edid; vcgencmd get_throttled'`.
