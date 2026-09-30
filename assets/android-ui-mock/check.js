@@ -9,6 +9,31 @@ const STATUS_WORDS = {
   idle: ['Offline', 'Disconnected', 'Paused', 'Stopped', 'Not set up', 'Not added', 'Showing the cover', 'No device online']
 };
 
+// A filled button is allowed only for the verb a page or sheet exists for.
+const FILLED_VERBS = /^(Send|Save|Install|Create)\b/;
+
+/**
+ * Reads the screens and the sheets as text and reports any line that draws
+ * its own markup. A screen with no tag, class or style in it can only have
+ * been built from the parts in kit.js.
+ */
+let KIT_AUDIT = null;
+async function kitAudit() {
+  const problems = [];
+  let lines = 0;
+  for (const file of ['screens.js', 'sheets.js']) {
+    const text = await (await fetch(file, { cache: 'no-store' })).text();
+    text.split('\n').forEach((line, n) => {
+      if (/^\s*(\/\/|\/?\*)/.test(line)) return;
+      lines++;
+      const tag = line.match(/<\/?[a-z][a-z0-9]*[\s>]/i), own = line.match(/\b(class|style)=/);
+      if (tag || own) problems.push(`${file} line ${n + 1} draws its own ${tag ? tag[0].trim() : own[0]} where a part belongs`);
+    });
+  }
+  return (KIT_AUDIT = { problems, lines });
+}
+kitAudit();
+
 function runChecks() {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:-9999px;top:0';
@@ -71,8 +96,12 @@ function runChecks() {
       }
       for (const b of el.querySelectorAll('.seg button span')) if (b.scrollWidth > b.clientWidth + 1) found.push(`${tag}: tab "${b.innerText}" is cut`);
       for (const t of el.querySelectorAll('.row-title .clamp')) { const word = t.innerText.trim(); if (!/[\s-]/.test(word) && t.clientHeight > parseFloat(getComputedStyle(t).lineHeight) * 1.5) found.push(`${tag}: the one word "${word}" is broken across lines`); }
-      if (el.querySelectorAll('.btn.primary').length + el.querySelectorAll('.p-page .ibtn.go, .p-page .shutter').length > 1 && !el.querySelector('.sheet'))
-        found.push(`${tag}: more than one primary action on the page`);
+      if (f.place !== 'showcase') {
+        if (el.querySelectorAll('.btn.primary').length + el.querySelectorAll('.p-page .shutter, .p-page .transport .main').length > 1 && !el.querySelector('.sheet'))
+          found.push(`${tag}: more than one filled control on the page`);
+        if (el.querySelectorAll('.sheet .btn.primary').length > 1) found.push(`${tag}: more than one filled button in the sheet`);
+        for (const b of el.querySelectorAll('.btn.primary')) if (!FILLED_VERBS.test(b.innerText.trim())) found.push(`${tag}: "${b.innerText.trim()}" is filled, and only Send, Save, Install and Create may be`);
+      }
 
       for (const a of el.querySelectorAll('[data-act]')) if (!ACTS[a.dataset.act]) found.push(`${tag}: tap "${a.dataset.act}" does nothing`);
       for (const a of el.querySelectorAll('[data-act="sheet"]')) if (!SHEETS[a.dataset.arg.split('|')[0]]) found.push(`${tag}: sheet "${a.dataset.arg}" does not exist`);
@@ -98,6 +127,9 @@ function runChecks() {
       el.remove();
     }
   }
+
+  if (!KIT_AUDIT) found.push('the kit audit has not finished reading the screens, run the checks again');
+  else found.push(...KIT_AUDIT.problems);
 
   for (const p of PLACES) {
     if (!SCREENS[p.id]) found.push(`no screen for ${p.id}`);

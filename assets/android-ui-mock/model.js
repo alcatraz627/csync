@@ -69,7 +69,8 @@ const PLACES = [
   { id: 'guide', kind: 'page', parent: 'more', label: 'Assistant guide', icon: 'help', built: 'partly',
     asks: ['SE-10'] },
   { id: 'help', kind: 'page', parent: 'more', label: 'Help and about', icon: 'info', built: 'partly',
-    asks: ['SE-11'] }
+    asks: ['SE-11'] },
+  { id: 'showcase', kind: 'page', parent: 'help', label: 'Design system', icon: 'palette', built: 'no', asks: [] }
 ];
 
 const PLACE = Object.fromEntries(PLACES.map(p => [p.id, p]));

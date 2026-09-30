@@ -150,6 +150,167 @@ function markdown(source) {
   return `<div class="md">${out.join('')}</div>`;
 }
 
+// Composites: parts made of the parts above. A screen that needs one of these
+// asks for it by name, so there is one drawing of each in the whole app.
+
+const sessionWords = s => s.busy ? 'Loading' : s.live ? 'Live' : s.paused ? 'Paused' : 'Playing';
+const sessionTone = s => s.busy ? 'warn' : s.paused ? 'idle' : 'good';
+
+/** The first line of a page that reports on something: one dot, one sentence. */
+const lead = (tone, words) => `<div class="status lead"><i class="dot ${tone}"></i><span>${esc(words)}</span></div>`;
+const btns = (...buttons) => `<div class="btns">${buttons.join('')}</div>`;
+const tiles = html => `<div class="tiles">${html}</div>`;
+const card = html => `<div class="card">${html}</div>`;
+const noteLine = (symbols, text) => `<p class="note-line">${[].concat(symbols).map(s => icon(s, 14)).join('')}${esc(text)}</p>`;
+const defs = pairs => `<div class="group defs">${pairs.map(([name, does]) => `<p><b>${esc(name)}</b><span>: ${esc(does)}</span></p>`).join('')}</div>`;
+
+/** Where a picture or a video goes. mode: live, idle or nothing; tag: [icon, words]. */
+function picture(o = {}) {
+  const cls = ['picture', o.mode, o.loading && 'loading'].filter(Boolean).join(' ');
+  const tag = o.tag ? `<span class="tag">${icon(o.tag[0], 13)}${esc(o.tag[1])}</span>` : '';
+  return `<div class="${cls}">${icon(o.icon, o.size || 36)}${tag}</div>`;
+}
+
+/** A cover as the Pi screen will show it, with its fit, turn and crop applied. */
+function framedPicture(art, f, tag) {
+  return `<div class="picture framed" style="--art:${art};--turn:${f.rotate}deg" data-fit="${f.fit}" data-crop="${f.crop}"><i></i><span class="tag">${icon(tag[0], 13)}${esc(tag[1])}</span></div>`;
+}
+
+function coverGrid(names, art, chosen, act) {
+  return `<div class="covers">${names.map((c, i) => `<button type="button" class="cover" aria-pressed="${c === chosen}" ${on(act, c)} aria-label="Use ${esc(c)}"><span style="background:${art[i]}">${esc(c)}</span></button>`).join('')}</div>`;
+}
+
+/** A slider with its value written above it. `live` lets the value change while dragging. */
+function range(o) {
+  const ends = o.low != null ? `<div class="range-ends"><span>${esc(o.low)}</span><span>${esc(o.high)}</span></div>` : '';
+  return `<div class="labelled"><span ${o.live ? `data-live="${o.id}"` : ''}>${esc(o.shown)}</span><input class="range${o.hue ? ' hue' : ''}" type="range" min="${o.min}" max="${o.max}" step="${o.step || 1}" value="${o.value}" data-in="${o.id}" data-arg="${esc(o.arg || '')}" aria-label="${esc(o.label)}">${ends}${o.help ? `<small>${esc(o.help)}</small>` : ''}</div>`;
+}
+
+function swatches(accents, chosen, custom) {
+  const dots = accents.map(a => `<button type="button" class="swatch" style="--c:${a.fill}" aria-pressed="${chosen === a.id}" aria-label="${a.name}" title="${a.name}" ${on('accent', a.id)}>${chosen === a.id ? icon('check', 18) : ''}</button>`).join('');
+  const own = `<button type="button" class="swatch custom${custom ? ' set' : ''}" style="--c:${custom || 'transparent'}" aria-pressed="${chosen === 'custom'}" aria-label="Your own colour" title="Your own colour" ${on('sheet', 'custom')}>${icon(chosen === 'custom' ? 'check' : 'palette', 18)}</button>`;
+  return `<div class="swatches">${dots}${own}</div>`;
+}
+const swatchBig = colour => `<div class="swatch-big" style="background:${colour}">${icon('check', 22)}<span>Sample</span></div>`;
+
+/** Something attached, with a way to take it off again. */
+function chip(symbol, text, act, label) {
+  return `<span class="chip">${icon(symbol, 15)}${clamp(text, true)}${act ? ibtn('trash', label, act, '', 'quiet', 15) : ''}</span>`;
+}
+
+/** The camera's two controls: a shutter, and a smaller record button beside it. */
+function shoot(ready, recording) {
+  const off = ready ? '' : 'disabled';
+  return `<div class="shoot"><button type="button" class="shutter" ${on('photo')} aria-label="Take a photo" ${off}>${icon('camera', 28)}</button><button type="button" class="rec" ${on('record')} aria-label="${recording ? 'Stop recording' : 'Start recording'}" ${off}>${icon(recording ? 'stop' : 'record', 22)}</button></div>` +
+    `<div class="shoot-words"><span>Photo</span><span>${recording ? 'Stop' : 'Record'}</span></div>`;
+}
+
+/**
+ * Transport and settings for one output, used by the page and the panel.
+ * A live source (a camera, a shared screen) has no position, so it gets Stop and the settings only.
+ */
+function player(s, output, small = false) {
+  const big = small ? 19 : 22, pend = s.pending || {};
+  const wait = (key, shown) => pend[key] != null ? { status: ['warn', `${key === 'rotate' ? pend[key] + '°' : pend[key]}, applying`] } : { small: shown };
+  const volume = tile({ icon: 'volume', title: 'Volume', small: s.volume === 0 ? 'Muted' : `${s.volume}%`, act: 'sheet', arg: `volume|${output}`, cls: 'setting' });
+  const rotate = tile({ icon: 'rotate', title: 'Rotate', ...wait('rotate', `${s.rotate}°`), act: 'p-rotate', arg: output, cls: 'setting' });
+  if (s.live) return `<div class="player">${tiles(volume + rotate)}${btns(btn('Stop', 'stop', 'p-stop', output, 'danger wide'))}</div>`;
+  const transport = [
+    ibtn('favorite', s.favorite ? 'Remove favorite' : 'Favorite', 'p-favorite', output, s.favorite ? 'on' : 'quiet', big),
+    ibtn('rewind', `Back ${s.skip} seconds`, 'p-skip', `${output}|-1`, '', big),
+    ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', output, 'main', big + 2, s.busy ? 'disabled' : ''),
+    ibtn('fastforward', `Forward ${s.skip} seconds`, 'p-skip', `${output}|1`, '', big),
+    ibtn('skip', `Skip length, ${s.skip} seconds`, 'sheet', `skip|${output}`, 'quiet', big),
+    ibtn('stop', 'Stop', 'p-stop', output, 'stop', big)
+  ].join('');
+  const words = `<div class="transport-words"><span></span><span></span><span class="main">${s.paused ? 'Resume' : 'Pause'}</span><span></span><span>${s.skip} s</span><span>Stop</span></div>`;
+  const settings = volume +
+    tile({ icon: 'speed', title: 'Speed', small: `${s.speed}×`, act: 'sheet', arg: `speed|${output}`, cls: 'setting' }) + rotate +
+    tile({ icon: 'loop', title: 'Loop', ...wait('loop', s.loop), act: 'p-loop', arg: output, cls: 'setting' });
+  return `<div class="player"><input class="range" type="range" min="0" max="${s.total}" value="${s.at}" data-in="seek" data-arg="${esc(output)}" aria-label="Position"><div class="times"><span>${clock(s.at)}</span><span>${clock(s.total)}</span></div><div class="transport">${transport}</div>${words}${tiles(settings)}</div>`;
+}
+
+// Conversation parts.
+
+const msgs = html => `<div class="msgs">${html}</div>`;
+const thinking = () => `<button type="button" class="think" ${on('toast', 'The assistant looked up Elements and chose the Pi screen')}>${icon('forward', 13)}Thinking</button>`;
+
+/**
+ * One message. Yours sits on the right in a tint of the primary colour, the
+ * assistant's on the left on the surface. Tapping it shows what you can do with it.
+ */
+function bubble(m, i, picked = false, tappable = true) {
+  const files = (m.files || []).map(f => `<span class="msg-file">${icon(KIND_ICON[f.kind] || 'file', 15)}${clamp(f.title, true)}</span>`).join('');
+  const tap = tappable ? `${on('pick-msg', i)} tabindex="0" role="button" aria-label="Message, tap for what you can do with it"` : '';
+  const act = (symbol, label, name, arg) => `<button type="button" class="act" ${on(name, arg)}><span>${icon(symbol, 15)}${esc(label)}</span></button>`;
+  const acts = picked ? `<div class="msg-acts${m.me ? ' me' : ''}">${act('copy', 'Copy', 'toast', 'Copied')}${m.me ? act('edit', 'Edit', 'edit-msg', i) : act('refresh', 'Regenerate', 'regen', i)}${act('fork', 'Fork', 'sheet', `fork|${i}`)}</div>` : '';
+  return `<div class="msg${m.me ? ' me' : ''}${picked ? ' picked' : ''}" ${tap}>${files}${markdown(m.text)}<span class="msg-when">${esc(m.when)}</span></div>${acts}`;
+}
+
+const RESULT_ICON = { media: 'media', control: 'speed', image: 'photo', file: 'file', facts: 'tools', note: 'note', devices: 'devices' };
+
+/**
+ * What a tool gave back, drawn for its kind so the answer can be used where it
+ * is read. kind: media, control, image, file, facts, note or devices.
+ * `session` is what that output is playing now, so a media card stays truthful.
+ */
+function resultCard(r, arg, session) {
+  const open = on('sheet', `result|${arg}`);
+  const top = `<span class="rcard-top">${icon(RESULT_ICON[r.kind] || 'tools', 14)}${esc(r.tool)}</span>`;
+  const line = (title, sub) => `<span class="row-copy"><span class="row-title">${clamp(title)}</span>${sub ? `<span class="row-sub">${clamp(sub)}</span>` : ''}</span>`;
+  let body;
+  if (r.kind === 'media') {
+    const live = session && session.title === r.title;
+    const state = live ? status(sessionTone(session), `${sessionWords(session)} on ${r.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`) : status('idle', 'Stopped');
+    const bar = live && !session.live ? `<span class="bar-line"><i style="width:${Math.round(session.at / session.total * 100)}%"></i></span>` : '';
+    const ctl = live ? ibtn(session.paused ? 'play' : 'pause', session.paused ? 'Resume' : 'Pause', 'p-pause', r.output, '', 19) + ibtn('stop', 'Stop', 'p-stop', r.output, 'stop', 18)
+      : ibtn('play', `Play on ${r.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`, 'play', `${r.output}|${r.title}`, 'go', 17);
+    body = `<div class="rcard-row"><button type="button" class="rcard-main" ${open}><span class="row-copy"><span class="row-title">${clamp(r.title)}</span>${state}${bar}</span></button>${ctl}</div>`;
+  } else if (r.kind === 'image') {
+    body = `<button type="button" class="rcard-main pic" ${open} aria-label="Open ${esc(r.title)}">${picture({ icon: 'photo', mode: 'live', tag: ['photo', r.title] })}</button>`;
+  } else if (r.kind === 'facts' || r.kind === 'control') {
+    const rows = r.facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    body = `<button type="button" class="rcard-main" ${open} aria-label="Open ${esc(r.title)}"><dl class="kv">${rows}</dl></button>`;
+  } else if (r.kind === 'devices') {
+    body = `<div class="rcard-list">${r.devices.map(([name, up]) => `<span>${status(up ? 'good' : 'idle', up ? 'Online' : 'Offline')}<b>${esc(name)}</b></span>`).join('')}</div>`;
+  } else {
+    body = `<button type="button" class="rcard-main" ${open}><span class="row-ico">${icon(RESULT_ICON[r.kind] || 'file', 19)}</span>${line(r.title, r.sub)}${icon('forward', 16)}</button>`;
+  }
+  return `<div class="rcard">${top}${body}</div>`;
+}
+
+/** The top of a conversation: its title, what keeps it, and one quiet line under it. */
+function convoHead(o) {
+  const title = o.editing
+    ? `<input class="title-input" data-in="threadTitle" value="${esc(o.title)}" aria-label="Conversation title">`
+    : `<h2>${clamp(o.title)}</h2>`;
+  return `<div class="head"><div class="head-row">${title}${o.actions}</div>${o.line ? `<p class="model-line">${esc(o.line)}</p>` : ''}</div>`;
+}
+
+/**
+ * Where a message is written. One rounded box holds the text, what is attached,
+ * the way to add more, the model in use and Send, so they read as one control.
+ * It grows with the text, and opens taller when asked.
+ */
+function composer(o) {
+  const attached = o.attachment ? chip(KIND_ICON[o.attachment.kind] || 'file', o.attachment.title, 'chat-detach', 'Remove the attachment') : '';
+  const size = o.tall ? ibtn('chevron', 'Make the message box smaller', 'draft-size', '', 'quiet', 18) : o.long ? ibtn('expand', 'Make the message box taller', 'draft-size', '', 'quiet', 17) : '';
+  const grip = o.tall ? `<div class="handle" data-drag="draft"><span></span></div>` : '';
+  const model = `<button type="button" class="pill" ${on('sheet', 'model|chat')} aria-label="Model, ${esc(o.model)}">${icon('think-2', 15)}<span>${esc(o.model)}</span></button>`;
+  return `<div class="composer"><div class="compose${o.tall ? ' tall' : ''}">${grip}${attached}<div class="compose-text"><textarea data-in="draft" rows="1" ${o.tall ? `style="height:${o.height}px"` : ''} aria-label="Message" placeholder="Message the Pi">${esc(o.draft)}</textarea>${size}</div>` +
+    `<div class="compose-tools">${ibtn('plus', 'Add to this message', 'sheet', 'chat-add', 'quiet', 20)}${model}<span class="grow"></span>${ibtn('send', 'Send', 'send-chat', '', o.ready ? 'send ready' : 'send', 19, o.canSend ? '' : 'disabled')}</div></div></div>`;
+}
+
+// Editing parts.
+
+const editor = (id, value, label) => `<textarea class="editor" data-in="${id}" aria-label="${esc(label)}">${esc(value)}</textarea>`;
+const richEditor = (html, label) => `<div class="card rich" contenteditable="true" data-rich role="textbox" aria-multiline="true" aria-label="${esc(label)}">${html}</div>`;
+
+/** Android's own share menu, drawn only so the hand-off can be seen. It is not part of csync. */
+function appTiles(apps, act) {
+  return `<div class="apps">${apps.map(([name, symbol]) => `<button type="button" class="app" ${on(act, name)}><span>${icon(symbol, 22)}</span>${esc(name)}</button>`).join('')}</div>`;
+}
+
 const hexRgb = hex => (hex.replace('#', '').match(/../g) || ['0', '0', '0']).map(x => parseInt(x, 16) || 0);
 /** How well white text reads on a colour, as a contrast ratio. */
 function whiteOn(hex) {

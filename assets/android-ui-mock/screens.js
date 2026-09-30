@@ -1,42 +1,17 @@
 // One entry per place in the map. `actions` fills the right of the top bar,
-// `body` fills the page. Both read the state and change nothing.
+// `body` fills the page. Both read the state and change nothing, and both are
+// built only from the parts in kit.js: check.js fails a screen that draws its own.
 
 const piUp = S => S.pi === 'online';
 const active = S => Object.entries(S.sessions).filter(([, s]) => s).map(([output, s]) => ({ output, ...s }));
 const device = (S, name) => DEVICES.find(d => d.name === name);
-// A command that fails does not change what is playing, so the session keeps its state and a notice carries the failure.
-const sessionWords = s => s.busy ? 'Loading' : s.paused ? 'Paused' : 'Playing';
-const sessionTone = s => s.busy ? 'warn' : s.paused ? 'idle' : 'good';
 const left = h => `${clock(h.total - h.at)} left`;
 const thread = S => S.threads.find(t => t.id === S.threadId);
 const hubState = S => !piUp(S) ? ['idle', S.pi === 'checking' ? 'Checking the Raspberry Pi' : 'Raspberry Pi is offline']
   : S.power === 'low' ? ['warn', 'Raspberry Pi is online, power is low'] : ['good', 'Raspberry Pi is online'];
-const lead = (tone, words) => `<div class="status lead"><i class="dot ${tone}"></i><span>${esc(words)}</span></div>`;
 
 /** The one way every screen says the Pi is away, with the one place that can fix it. */
 const offlineNotice = S => piUp(S) ? '' : notice('info', 'The Raspberry Pi cannot be reached. What is saved on this phone still works.', btn('Open Connection', 'wifi', 'go', 'connection'));
-
-/** Transport and settings for one output, used by the page and the panel. */
-function playerControls(S, output, small = false) {
-  const s = S.sessions[output], big = small ? 19 : 22, pend = s.pending || {};
-  const transport = [
-    ibtn('favorite', s.favorite ? 'Remove favorite' : 'Favorite', 'p-favorite', output, s.favorite ? 'on' : 'quiet', big),
-    ibtn('rewind', `Back ${s.skip} seconds`, 'p-skip', `${output}|-1`, '', big),
-    ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', output, 'main', big + 2, s.busy ? 'disabled' : ''),
-    ibtn('fastforward', `Forward ${s.skip} seconds`, 'p-skip', `${output}|1`, '', big),
-    ibtn('skip', `Skip length, ${s.skip} seconds`, 'sheet', `skip|${output}`, 'quiet', big),
-    ibtn('stop', 'Stop', 'p-stop', output, 'stop', big)
-  ].join('');
-  const words = `<div class="transport-words"><span></span><span></span><span class="main">${s.paused ? 'Resume' : 'Pause'}</span><span></span><span>${s.skip} s</span><span>Stop</span></div>`;
-  const wait = (key, shown) => pend[key] != null ? { status: ['warn', `${key === 'rotate' ? pend[key] + '°' : pend[key]}, applying`] } : { small: shown };
-  const settings = [
-    tile({ icon: 'volume', title: 'Volume', small: s.volume === 0 ? 'Muted' : `${s.volume}%`, act: 'sheet', arg: `volume|${output}`, cls: 'setting' }),
-    tile({ icon: 'speed', title: 'Speed', small: `${s.speed}×`, act: 'sheet', arg: `speed|${output}`, cls: 'setting' }),
-    tile({ icon: 'rotate', title: 'Rotate', ...wait('rotate', `${s.rotate}°`), act: 'p-rotate', arg: output, cls: 'setting' }),
-    tile({ icon: 'loop', title: 'Loop', ...wait('loop', s.loop), act: 'p-loop', arg: output, cls: 'setting' })
-  ].join('');
-  return `<div class="player"><input class="range" type="range" min="0" max="${s.total}" value="${s.at}" data-in="seek" data-arg="${esc(output)}" aria-label="Position"><div class="times"><span>${clock(s.at)}</span><span>${clock(s.total)}</span></div><div class="transport">${transport}</div>${words}<div class="tiles">${settings}</div></div>`;
-}
 
 const INCOMING = {
   Video: { kind: 'video', icon: 'video', title: 'VID 2026-09-26.mp4', from: 'Gallery' },
@@ -45,6 +20,9 @@ const INCOMING = {
   Instagram: { kind: 'link', icon: 'video', title: 'A reel from Instagram', from: 'Instagram' },
   File: { kind: 'doc', icon: 'file', title: 'quote.pdf', from: 'Files' }
 };
+
+const KIND_WORDS = { image: 'Image', video: 'Video', audio: 'Sound', doc: 'File', text: 'Text', link: 'Link' };
+const longDraft = S => S.draft.split('\n').length > 1 || S.draft.length > 60;
 
 const SCREENS = {
 
@@ -73,7 +51,6 @@ const SCREENS = {
       ];
       const rank = { good: 0, warn: 1, idle: 2, bad: 3 };
       caps.sort((a, b) => rank[a.s[0]] - rank[b.s[0]]);
-      const tiles = `<div class="tiles">${caps.map(c => tile({ icon: c.icon, title: c.title, status: c.s, act: 'go', arg: c.to })).join('')}</div>`;
 
       const devices = group(DEVICES.filter(d => !d.self).sort((a, b) => b.online - a.online).map(d => {
         const st = d.hub ? [tone, !up ? 'Offline' : S.power === 'low' ? 'Low power' : 'Online'] : deviceStatus(d);
@@ -82,7 +59,7 @@ const SCREENS = {
 
       return lead(tone, words) + issue + offlineNotice(S) +
         section('Pick up', pickup, 'pickup', S.folded.pickup) +
-        section('Capabilities', tiles, 'caps', S.folded.caps) +
+        section('Capabilities', tiles(caps.map(c => tile({ icon: c.icon, title: c.title, status: c.s, act: 'go', arg: c.to })).join('')), 'caps', S.folded.caps) +
         section('Devices', devices, 'devices', S.folded.devices);
     }
   },
@@ -112,7 +89,7 @@ const SCREENS = {
     body(S) {
       const view = S.view.media, up = piUp(S), drive = S.drive === 'ok', q = S.mediaQuery.trim().toLowerCase();
       const phoneSource = S.source === 'This phone';
-      const scope = view === 'Files' || q ? `<p class="note-line">${icon(phoneSource ? 'device' : 'files', 15)}${esc(phoneSource ? 'Browsing this phone' : `Browsing ${S.source}`)}</p>` : '';
+      const scope = view === 'Files' || q ? noteLine(phoneSource ? 'device' : 'files', phoneSource ? 'Browsing this phone' : `Browsing ${S.source}`) : '';
       const top = (S.mediaSearch ? field({ id: 'mediaQuery', hint: `Search ${phoneSource ? 'this phone' : S.source}`, value: S.mediaQuery, icon: 'search' }) : '') +
         seg([['Files', 'files'], ['Videos', 'video'], ['History', 'history'], ['Access', 'access']], view, 'view-media', 'Media views') + scope;
       const itemRow = (it, sub) => row({ icon: KIND_ICON[it.kind], title: it.title, sub, act: 'sheet', arg: `${it.kind === 'folder' ? 'folder' : 'item'}|${it.title}`, opens: true });
@@ -152,7 +129,7 @@ const SCREENS = {
         const upRow = S.folder ? group(row({ icon: 'up', title: `Up to ${S.source}`, sub: `${S.source} / ${S.folder}`, act: 'folder', arg: '' })) : '';
         content = upRow +
           (folders.length ? section('Folders', group(folders.map(f => row({ icon: 'folder', title: f.title, sub: plural(f.count, 'item'), act: 'folder', arg: f.title, opens: true,
-            trailing: ibtn('download', `Save or send the folder ${f.title}`, 'sheet', `folder|${f.title}`, 'framed', 17) })).join(''))) : '') +
+            trailing: ibtn('download', `Save or send the folder ${f.title}`, 'sheet', `folder|${f.title}`, 'quiet', 18) })).join(''))) : '') +
           (files.length ? section('Files', group(files.map(f => itemRow(f, f.length ? `${f.length} · ${f.size}` : f.size)).join(''))) : '') +
           (!here.length ? empty('folder', 'This folder is empty', '', btn(`Up to ${S.source}`, 'up', 'folder', '')) : '');
       }
@@ -161,23 +138,30 @@ const SCREENS = {
   },
 
   'pi-screen': {
-    actions: S => S.sessions['Pi screen'] ? ibtn('device', 'Move to this phone', 'sheet', 'move|Pi screen') : '',
+    actions: S => S.sessions['Pi screen'] && !S.sessions['Pi screen'].live ? ibtn('device', 'Move to this phone', 'sheet', 'move|Pi screen') : '',
     body(S) {
       const s = S.sessions['Pi screen'];
       if (!piUp(S)) return head('Pi screen', status('idle', 'Offline')) + offlineNotice(S);
       if (s) {
+        const fromPhone = s.source === 'This phone';
         return head(s.title, status(sessionTone(s), `${sessionWords(s)} on Pi screen`)) +
-          `<div class="picture live${s.busy ? ' loading' : ''}">${icon('video', 40)}<span class="tag">${icon('screen', 13)}On the Pi screen</span></div>` +
+          picture({ icon: fromPhone ? 'device' : s.live ? 'image' : 'video', size: 40, mode: 'live', loading: s.busy, tag: ['screen', 'On the Pi screen'] }) +
+          (fromPhone ? noteLine('eye', 'What is on this phone is on the Pi screen until you stop.') : '') +
           (s.error ? notice('bad', s.error, btn('Try again', 'refresh', 'p-pause', 'Pi screen')) : '') +
           (S.power === 'low' ? notice('warn', 'Power is low. The picture may stop.', btn('Open Tools', 'tools', 'go', 'tools')) : '') +
-          playerControls(S, 'Pi screen');
+          player(s, 'Pi screen');
       }
       return head('Nothing is playing', status('idle', 'Showing the cover')) +
-        `<div class="picture idle">${icon('image', 36)}<span class="tag">${icon('image', 13)}${esc(S.cover)}</span></div>` +
-        section('Put something on the screen', group(
+        picture({ icon: 'image', mode: 'idle', tag: ['image', S.cover] }) +
+        section('From the Pi', group(
           row({ icon: 'media', title: 'Browse Media', sub: 'Films, shows, photos', act: 'go', arg: 'media', opens: true }) +
-          row({ icon: 'link', title: 'A YouTube link', sub: 'Or share a video from the YouTube app', act: 'sheet', arg: 'youtube', opens: true }) +
+          row({ icon: 'photo', title: 'Photos as a slideshow', sub: 'Every image in a folder, in turn', act: 'sheet', arg: 'slideshow', opens: true }) +
           row({ icon: 'camera', title: 'The Pi camera', sub: 'Live picture', act: 'show-camera', arg: '' }))) +
+        section('From this phone', group(
+          row({ icon: 'device', title: "This phone's screen", sub: 'Everything you see, live', act: 'sheet', arg: 'cast|screen', opens: true }) +
+          row({ icon: 'launcher', title: 'One app', sub: 'Only that app is shown', act: 'sheet', arg: 'cast|app', opens: true }) +
+          row({ icon: 'link', title: 'A link', sub: 'YouTube, or share a video from another app', act: 'sheet', arg: 'youtube', opens: true }) +
+          row({ icon: 'note', title: 'A note', sub: 'Shown large, easy to read across a room', act: 'sheet', arg: 'show-note', opens: true }))) +
         section('When nothing is playing', group(row({ icon: 'image', title: 'Cover image', value: S.cover, act: 'go', arg: 'covers', opens: true })));
     }
   },
@@ -186,14 +170,14 @@ const SCREENS = {
     body(S) {
       const f = S.framing[S.cover] || { fit: 'Cover', rotate: 0, crop: 'Full' }, at = Math.max(0, COVERS.indexOf(S.cover));
       return head(S.cover, 'Shown on the Pi screen when nothing is playing') +
-        `<div class="picture framed" style="--art:${COVER_ART[at] || COVER_ART[0]};--turn:${f.rotate}deg" data-fit="${f.fit}" data-crop="${f.crop}"><i></i><span class="tag">${icon('screen', 13)}On the Pi screen</span></div>` +
-        `<div class="covers">${COVERS.map((c, i) => `<button type="button" class="cover" aria-pressed="${c === S.cover}" ${on('cover', c)} aria-label="Use ${esc(c)}"><span style="background:${COVER_ART[i]}">${esc(c)}</span></button>`).join('')}</div>` +
-        `<div class="btns">${btn('Add an image', 'plus', 'toast', 'Choose an image from this phone')}</div>` +
+        framedPicture(COVER_ART[at] || COVER_ART[0], f, ['screen', 'On the Pi screen']) +
+        coverGrid(COVERS, COVER_ART, S.cover, 'cover') +
+        btns(btn('Add an image', 'plus', 'toast', 'Choose an image from this phone')) +
         section('Frame this image',
           labelled('Fit', seg([['Cover', 'expand'], ['Contain', 'fit'], ['Stretch', 'screen']], f.fit, 'frame-fit', 'Fit')) +
           group(row({ icon: 'rotate', title: 'Rotate', value: `${f.rotate}°`, act: 'frame-turn' })) +
           labelled('Crop', seg([['Full', 'image'], ['Center', 'crop'], ['Top', 'up']], f.crop, 'frame-crop', 'Crop'), 'The image file is never changed.')) +
-        `<div class="btns">${btn('Clear framing', 'refresh', 'frame-clear', '', 'quiet')}</div>`;
+        btns(btn('Clear framing', 'refresh', 'frame-clear', '', 'quiet'));
     }
   },
 
@@ -201,11 +185,11 @@ const SCREENS = {
     actions: S => S.sessions['This phone'] ? ibtn('expand', 'Full screen', 'full', 'on') + ibtn('screen', 'Move to the Pi screen', 'sheet', 'move|This phone') : '',
     body(S) {
       const s = S.sessions['This phone'];
-      if (!s) return empty('device', 'Nothing is playing on this phone', '', btn('Browse Media', 'media', 'go', 'media', 'primary'));
+      if (!s) return empty('device', 'Nothing is playing on this phone', '', btn('Browse Media', 'media', 'go', 'media'));
       return head(s.title, status(sessionTone(s), `${sessionWords(s)} on this phone`)) +
-        `<div class="picture live${s.busy ? ' loading' : ''}">${icon('video', 40)}<span class="tag">${icon('device', 13)}On this phone</span></div>` +
+        picture({ icon: 'video', size: 40, mode: 'live', loading: s.busy, tag: ['device', 'On this phone'] }) +
         (s.error ? notice('bad', s.error, btn('Try again', 'refresh', 'p-pause', 'This phone')) : '') +
-        playerControls(S, 'This phone');
+        player(s, 'This phone');
     }
   },
 
@@ -224,7 +208,7 @@ const SCREENS = {
       return group(row({ icon: deviceIcon(to), title: `Send to ${to.name}`, status: deviceStatus(to), act: 'sheet', arg: 'recipient', opens: true })) + offline + failed +
         field({ id: 'shareText', hint: 'Write a message', value: S.shareText, icon: 'text', tall: true }) +
         group(attach + row({ icon: 'clipboard', title: 'Use the clipboard', sub: S.clip.sub, act: 'sheet', arg: 'clipboard', opens: true })) +
-        `<div class="btns">${btn('Send', 'send', 'send', '', 'primary wide', ready ? '' : 'disabled')}</div>` +
+        btns(btn('Send', 'send', 'send', '', 'primary wide', ready ? '' : 'disabled')) +
         section('Sent from this phone', history);
     }
   },
@@ -242,76 +226,63 @@ const SCREENS = {
       const it = INCOMING[S.view.incoming], plays = ['video', 'link'].includes(it.kind), o = S.incomingOptions;
       const options = plays ? section('How it plays',
         group(row({ icon: 'loop', title: 'Loop', trailing: toggle(o.loop === 'On', 'in-loop', 'Loop') })) +
-        labelled(`Speed, ${o.speed}×`, `<input class="range" type="range" min="0.5" max="2" step="0.25" value="${o.speed}" data-in="in-speed" aria-label="Speed">`) +
-        labelled(o.volume === 0 ? 'Volume, muted' : `Volume, ${o.volume}%`, `<input class="range" type="range" min="0" max="100" step="5" value="${o.volume}" data-in="in-volume" aria-label="Volume">`, 'These start the way you last played.')) : '';
-      return head('Shared with csync') +
+        range({ id: 'in-speed', label: 'Speed', shown: `Speed, ${o.speed}×`, value: o.speed, min: 0.5, max: 2, step: 0.25 }) +
+        range({ id: 'in-volume', label: 'Volume', shown: o.volume === 0 ? 'Volume, muted' : `Volume, ${o.volume}%`, value: o.volume, min: 0, max: 100, step: 5, help: 'These start the way you last played.' })) : '';
+      return head('Where should it go?') +
         group(row({ icon: it.icon, title: it.title, sub: S.view.incoming === 'Instagram' ? 'From Instagram. It is saved to the Pi first, then played.' : `From ${it.from}` })) +
-        (plays ? offlineNotice(S) : '') + options + actionGroups(S, { kind: it.kind, title: it.title });
+        (plays ? offlineNotice(S) : '') + actionGroups(S, { kind: it.kind, title: it.title, incoming: true }) + options;
     }
   },
 
   chat: {
-    actions: S => ibtn('search', 'Search conversations', 'toggle', 'chatSearch', S.chatSearch ? 'on' : ''),
+    actions: S => ibtn('search', 'Search conversations', 'toggle', 'chatSearch', S.chatSearch ? 'on' : '') +
+      ibtn('think-2', 'Model for new conversations', 'sheet', 'model|default', 'quiet') +
+      ibtn('plus', 'New chat', 'new-thread', '', '', 21, piUp(S) ? '' : 'disabled'),
     body(S) {
       const view = S.view.chat;
       const state = S.pi === 'online' ? ['good', 'The Pi assistant is online'] : S.pi === 'checking' ? ['warn', 'Checking the Pi assistant'] : ['idle', 'The Pi assistant is offline'];
       const top = lead(...state) + offlineNotice(S) +
         seg([['All', 'all'], ['Favorites', 'favorite'], ['Archived', 'archive'], ['Tools', 'clipboard']], view, 'view-chat', 'Conversation views');
-      if (view === 'Tools') {
-        return top + ASSISTANT_TOOLS.map(g => section(g.group, `<div class="group defs">${g.tools.map(([name, does]) => `<p><b>${esc(name)}</b><span>: ${esc(does)}</span></p>`).join('')}</div>`)).join('');
-      }
+      if (view === 'Tools') return top + ASSISTANT_TOOLS.map(g => section(g.group, defs(g.tools))).join('');
       const q = S.chatQuery.trim().toLowerCase();
       const rows = S.threads.filter(t => (view === 'Archived' ? t.archived : !t.archived) && (view !== 'Favorites' || t.favorite) && (!q || t.title.toLowerCase().includes(q)));
       const showAll = btn('Show all conversations', 'all', 'view', 'chat|All');
       const none = q ? empty('search', `No conversation matches "${S.chatQuery.trim()}"`, '', btn('Search everything', 'search', 'go', 'search'))
         : view === 'Favorites' ? empty('favorite', 'No favorites yet', 'Open a conversation and tap the heart to keep it here.', showAll)
         : view === 'Archived' ? empty('archive', 'Nothing archived', 'Archived conversations leave the main list and wait here.', showAll)
-        : empty('chat', 'No conversations yet', 'Ask the Pi assistant to find, play or check something.');
+        : empty('chat', 'No conversations yet', 'Ask the Pi assistant to find, play or check something.', btn('New chat', 'plus', 'new-thread', '', 'tonal', piUp(S) ? '' : 'disabled'));
       return top + (S.chatSearch ? field({ id: 'chatQuery', hint: 'Search conversations', value: S.chatQuery, icon: 'search' }) : '') +
-        `<div class="btns">${btn('New chat', 'plus', 'new-thread', '', 'primary', piUp(S) ? '' : 'disabled')}${btn('Settings', 'settings', 'sheet', 'model|default')}</div>` +
         (rows.length ? section(view === 'All' ? 'Recent' : view, group(rows.map(t => row({ icon: 'chat', title: t.title, sub: `${t.when} · ${plural(t.count, 'message')}`, act: 'open-thread', arg: t.id, opens: true })).join(''))) : none);
     }
   },
 
   conversation: {
+    actions: S => thread(S).messages.length ? ibtn('download', 'Save this conversation', 'sheet', 'export-chat') : '',
     body(S) {
       const t = thread(S), started = t.messages.length > 0;
-      const title = S.editingTitle
-        ? `<input class="title-input" data-in="threadTitle" value="${esc(t.title)}" aria-label="Conversation title">`
-        : `<h2>${clamp(t.title)}</h2>`;
-      const tokens = Number.isFinite(t.tokens) ? ` · ${compact(t.tokens)} tokens` : '';
       const keep = started ? ibtn('favorite', t.favorite ? 'Remove from favorites' : 'Add to favorites', 'fav-thread', '', t.favorite ? 'on' : 'quiet', 18) + ibtn('archive', t.archived ? 'Take out of the archive' : 'Archive', 'arch-thread', '', t.archived ? 'on' : 'quiet', 18) : '';
-      const headRow = `<div class="head"><div class="head-row">${title}${ibtn('edit', 'Edit the title', 'edit-title', '', 'quiet', 18)}${keep}</div><p class="model-line">${esc(S.model)} <span class="effort">${esc(S.effort.toLowerCase())}</span>${tokens}</p></div>`;
-      const msgs = t.messages.map((m, i) => {
-        if (m.thinking) return `<button type="button" class="think" ${on('toast', 'The assistant looked up Elements and chose the Pi screen')}>${icon('forward', 13)}Thinking</button>`;
-        const bubble = `<div class="msg${m.me ? ' me' : ''}" ${on('pick-msg', i)} tabindex="0" role="button" aria-label="Message, tap for copy and fork">${markdown(m.text)}</div>`;
-        const acts = S.pickedMsg === i ? ibtn('copy', 'Copy this message', 'toast', 'Copied', 'quiet', 16) + ibtn('fork', 'Fork from here', 'sheet', `fork|${i}`, 'quiet', 16) : '';
-        const meta = `<div class="msg-meta${m.me ? ' me' : ''}"><span>${esc(m.when)}</span>${acts}</div>`;
-        const results = m.results ? `<div class="results">${group(m.results.map((r, j) => row({ icon: { media: 'media', facts: 'tools', image: 'photo', file: 'file' }[r.kind], title: r.title, sub: r.sub, act: 'sheet', arg: `result|${i}|${j}`, opens: true })).join(''))}</div>` : '';
-        return bubble + meta + results;
-      }).join('');
-      return headRow + (piUp(S) ? '' : notice('info', 'The Pi assistant is offline. You can read this conversation. Sending waits for the Pi.', btn('Open Connection', 'wifi', 'go', 'connection'))) +
-        (started ? `<div class="msgs">${msgs}</div>` : empty('chat', 'Ask the Pi assistant', 'It can find and play media, check the Pi and keep notes.', btn('See what it can use', 'clipboard', 'sheet', 'tools')));
+      const said = t.messages.filter(m => !m.thinking).length;
+      const line = started ? plural(said, 'message') + (Number.isFinite(t.tokens) ? ` · ${compact(t.tokens)} tokens` : '') : '';
+      const top = convoHead({ title: t.title, editing: S.editingTitle, line, actions: ibtn('edit', 'Edit the title', 'edit-title', '', 'quiet', 18) + keep });
+      const flow = t.messages.map((m, i) => m.thinking ? thinking()
+        : bubble(m, i, S.pickedMsg === i) + (m.results || []).map((r, j) => resultCard(r, `${i}|${j}`, S.sessions[r.output])).join('')).join('');
+      return top + (piUp(S) ? '' : notice('info', 'The Pi assistant is offline. You can read this conversation. Sending waits for the Pi.', btn('Open Connection', 'wifi', 'go', 'connection'))) +
+        (started ? msgs(flow) : empty('chat', 'Ask the Pi assistant', 'It can find and play media, check the Pi and keep notes.', btn('See what it can use', 'clipboard', 'sheet', 'tools')));
     },
     composer(S) {
-      const long = S.draft.split('\n').length > 2 || S.draft.length > 90;
-      const panel = S.draftOpen ? `<div class="draft" style="height:${S.draftHeight}px"><div class="handle" data-drag="draft"><span></span></div><textarea data-in="draft" aria-label="Message" placeholder="Message the Pi">${esc(S.draft)}</textarea></div>` : '';
-      const chip = S.chatAttachment ? `<span class="chip">${icon(KIND_ICON[S.chatAttachment.kind] || 'file', 15)}${esc(S.chatAttachment.title)}${ibtn('trash', 'Remove the attachment', 'chat-detach', '', 'quiet', 15)}</span>` : '';
-      const line = S.draftOpen || long
-        ? `<button type="button" class="field" ${on('draft-open')} aria-label="Open the full message"><span class="clamp one">${esc(S.draft.split('\n')[0] || 'Message the Pi')}</span></button>`
-        : `<div class="field"><textarea data-in="draft" rows="1" aria-label="Message" placeholder="Message the Pi">${esc(S.draft)}</textarea></div>`;
-      return `<div class="composer">${panel}${chip}<div class="composer-row">${ibtn('plus', 'Add to this message', 'sheet', 'chat-add', 'framed', 19)}${line}${ibtn('send', 'Send', 'send-chat', '', 'send', 19, piUp(S) ? '' : 'disabled')}</div></div>`;
+      return composer({ draft: S.draft, tall: S.draftOpen, height: S.draftHeight, long: longDraft(S), attachment: S.chatAttachment,
+        model: `${S.model} ${S.effort.toLowerCase()}`, ready: Boolean(S.draft.trim() || S.chatAttachment), canSend: piUp(S) });
     }
   },
 
   more: {
     body(S) {
-      const up = piUp(S), tools = !up ? ['idle', 'Offline'] : S.power === 'low' ? ['warn', 'Low power'] : ['good', 'Ready'];
+      const up = piUp(S), toolState = !up ? ['idle', 'Offline'] : S.power === 'low' ? ['warn', 'Low power'] : ['good', 'Ready'];
       return section('On the Pi', group(
         row({ icon: 'camera', title: 'Pi camera', sub: 'Live picture, photos and recordings', act: 'go', arg: 'camera', opens: true }) +
         row({ icon: 'note', title: 'Notes', sub: `${plural(S.notes.length, 'note')} and ${plural(S.pins.length, 'pin')}`, act: 'go', arg: 'notes', opens: true }))) +
         section('Looking after things', group(
-          row({ icon: 'tools', title: 'Tools', sub: 'Pi health, this phone, updates', status: tools, act: 'go', arg: 'tools', opens: true }) +
+          row({ icon: 'tools', title: 'Tools', sub: 'Pi health, this phone, updates', status: toolState, act: 'go', arg: 'tools', opens: true }) +
           row({ icon: 'settings', title: 'Settings', sub: 'How the app connects, plays and looks', act: 'go', arg: 'settings', opens: true }))) +
         section('Reference', group(
           row({ icon: 'help', title: 'Assistant guide', sub: 'What you can ask the Pi assistant', act: 'go', arg: 'guide', opens: true }) +
@@ -323,12 +294,8 @@ const SCREENS = {
     body(S) {
       const up = piUp(S), connecting = up && S.camera === 'connecting', ready = up && !connecting;
       const st = !up ? ['idle', 'Offline'] : connecting ? ['warn', 'Connecting'] : S.recording ? ['good', 'Recording, 0:18'] : ['good', 'Live'];
-      const picture = !up ? `<div class="picture">${icon('camera', 36)}</div>`
-        : connecting ? `<div class="picture loading">${icon('camera', 36)}</div>`
-        : `<div class="picture live">${icon('camera', 36)}${S.recording ? `<span class="tag">${icon('record', 11)}Recording</span>` : ''}</div>`;
-      return lead(...st) + picture + offlineNotice(S) +
-        `<div class="shoot"><button type="button" class="shutter" ${on('photo')} aria-label="Take a photo" ${ready ? '' : 'disabled'}>${icon('camera', 28)}</button><button type="button" class="rec" ${on('record')} aria-label="${S.recording ? 'Stop recording' : 'Start recording'}" ${ready ? '' : 'disabled'}>${icon(S.recording ? 'stop' : 'record', 22)}</button></div>` +
-        `<div class="shoot-words"><span>Photo</span><span>${S.recording ? 'Stop' : 'Record'}</span></div>` +
+      const view = picture({ icon: 'camera', mode: ready ? 'live' : '', loading: connecting, tag: ready && S.recording ? ['record', 'Recording'] : null });
+      return lead(...st) + view + offlineNotice(S) + shoot(ready, S.recording) +
         group(row({ icon: 'photo', title: 'Captures', sub: plural(S.captures.reduce((n, d) => n + d.items.length, 0), 'photo and recording', 'photos and recordings'), act: 'go', arg: 'captures', opens: true }) +
           row({ icon: 'screen', title: 'Show on Pi screen', sub: ready ? 'The live picture' : '', off: !ready, act: 'show-camera' }));
     }
@@ -337,41 +304,42 @@ const SCREENS = {
   captures: {
     body(S) {
       const days = S.captures.filter(d => d.items.length);
-      if (!days.length) return empty('photo', 'No captures yet', 'Photos and recordings from the Pi camera are kept here.', btn('Open the camera', 'camera', 'go', 'camera', 'primary'));
+      if (!days.length) return empty('photo', 'No captures yet', 'Photos and recordings from the Pi camera are kept here.', btn('Open the camera', 'camera', 'go', 'camera'));
       return days.map(d => section(d.day, group(d.items.map(c => row({ icon: c.kind === 'Photo' ? 'photo' : 'video', title: c.kind === 'Photo' ? 'Photo' : `Recording, ${c.length}`, sub: `${c.when} · ${c.size}`, act: 'sheet', arg: `capture|${c.id}`, opens: true })).join('')))).join('');
     }
   },
 
   notes: {
-    actions: S => ibtn('search', 'Search notes and pins', 'toggle', 'notesSearch', S.notesSearch ? 'on' : ''),
+    actions: S => ibtn('search', 'Search notes and pins', 'toggle', 'notesSearch', S.notesSearch ? 'on' : '') +
+      (S.view.notes === 'Notes' ? ibtn('plus', 'New note', 'new-note', '', '', 21) : ibtn('plus', 'New pin', 'new-pin', '', '', 21)),
     body(S) {
       const view = S.view.notes, q = S.noteQuery.trim().toLowerCase(), everywhere = btn('Search everything', 'search', 'go', 'search');
       const top = seg([['Notes', 'note'], ['Pins', 'pin']], view, 'view-notes', 'Notes or pins') +
         (S.notesSearch ? field({ id: 'noteQuery', hint: `Search ${view.toLowerCase()}`, value: S.noteQuery, icon: 'search' }) : '');
       if (view === 'Notes') {
         const rows = S.notes.filter(n => !q || `${n.title} ${n.body}`.toLowerCase().includes(q));
-        return top + `<div class="btns">${btn('New note', 'plus', 'new-note', '', 'primary')}</div>` +
-          (rows.length ? group(rows.map(n => row({ icon: 'note', title: n.title, sub: n.edited, act: 'open-note', arg: n.id, opens: true })).join(''))
-            : q ? empty('search', `No note matches "${S.noteQuery.trim()}"`, '', everywhere) : empty('note', 'No notes yet', 'Notes are kept on the Pi and the assistant can read them.'));
+        return top + (rows.length ? group(rows.map(n => row({ icon: 'note', title: n.title, sub: n.edited, value: n.items.length ? plural(n.items.length, 'item') : '', act: 'open-note', arg: n.id, opens: true })).join(''))
+          : q ? empty('search', `No note matches "${S.noteQuery.trim()}"`, '', everywhere)
+          : empty('note', 'No notes yet', 'Notes are kept on the Pi and the assistant can read them.', btn('New note', 'plus', 'new-note', '', 'tonal')));
       }
       const rows = S.pins.filter(p => !q || `${p.title} ${p.link || p.text} ${p.tags.join(' ')}`.toLowerCase().includes(q));
-      return top + `<div class="btns">${btn('New pin', 'plus', 'new-pin', '', 'primary')}</div>` +
-        (rows.length ? group(rows.map(p => row({ icon: p.link ? 'link' : 'text', title: p.title, sub: p.link ? new URL(p.link).host : 'Text', value: p.tags.length ? plural(p.tags.length, 'tag') : '', act: 'open-pin', arg: p.id, opens: true })).join(''))
-          : q ? empty('search', `No pin matches "${S.noteQuery.trim()}"`, '', everywhere) : empty('pin', 'No pins yet', 'Save a link or a snippet to find it again.'));
+      return top + (rows.length ? group(rows.map(p => row({ icon: p.link ? 'link' : 'text', title: p.title, sub: p.link ? new URL(p.link).host : 'Text', value: p.tags.length ? plural(p.tags.length, 'tag') : '', act: 'open-pin', arg: p.id, opens: true })).join(''))
+        : q ? empty('search', `No pin matches "${S.noteQuery.trim()}"`, '', everywhere)
+        : empty('pin', 'No pins yet', 'Save a link or a snippet to find it again.', btn('New pin', 'plus', 'new-pin', '', 'tonal')));
     }
   },
 
   note: {
     actions: () => ibtn('open', 'Send or share this note', 'sheet', 'share-note') + ibtn('trash', 'Delete this note', 'sheet', 'delete-note', 'quiet'),
     body(S) {
-      const n = S.notes.find(x => x.id === S.noteId), mode = S.view.note;
+      const n = S.notes.find(x => x.id === S.noteId), mode = S.view.note, editing = mode !== 'Preview';
       const modes = seg([['Preview', 'eye'], ['Rich', 'edit'], ['Plain', 'markdown']], mode, 'view-note', 'How to see this note');
-      if (mode === 'Preview') return head(n.title, n.edited) + modes + `<div class="card">${markdown(n.body)}</div>`;
-      const editor = mode === 'Rich'
-        ? `<div class="card rich" contenteditable="true" data-rich role="textbox" aria-multiline="true" aria-label="Note, formatted">${markdown(n.body)}</div>`
-        : `<textarea class="editor" data-in="noteBody" aria-label="Note, as Markdown">${esc(n.body)}</textarea>`;
-      return labelled('Title', field({ id: 'noteTitle', hint: 'Title', value: n.title, icon: 'note' })) + modes + editor +
-        `<div class="btns">${btn('Save', 'check', 'save-note', '', 'primary')}${btn('Add an image', 'image', 'toast', 'Choose an image from this phone')}</div>`;
+      const kept = n.items.length ? section('In this note', group(n.items.map((it, i) => row({ icon: KIND_ICON[it.kind], title: it.title, sub: KIND_WORDS[it.kind], act: 'sheet', arg: `note-item|${i}`, opens: true })).join(''))) : '';
+      if (!editing) return head(n.title, n.edited) + modes + (n.body.trim() ? card(markdown(n.body)) : '') + kept +
+        (n.body.trim() || n.items.length ? '' : empty('note', 'This note is empty', 'Write in Rich or Plain, or add a picture, a video or a file.'));
+      const text = mode === 'Rich' ? richEditor(markdown(n.body), 'Note, formatted') : editor('noteBody', n.body, 'Note, as Markdown');
+      return labelled('Title', field({ id: 'noteTitle', hint: 'Title', value: n.title, icon: 'note' })) + modes + text + kept +
+        btns(btn('Save', 'check', 'save-note', '', 'primary'), btn('Add to this note', 'plus', 'sheet', 'note-add'));
     }
   },
 
@@ -383,24 +351,24 @@ const SCREENS = {
         labelled('Title', field({ id: 'pinTitle', hint: 'Title', value: p.title, icon: 'pin' })) +
         labelled('Tags', field({ id: 'pinTags', hint: 'Separate tags with commas', value: p.tags.join(', '), icon: 'tag' })) +
         labelled('About', field({ id: 'pinAbout', hint: 'Why you kept it', value: p.about, icon: 'text', tall: true })) +
-        `<div class="btns">${btn('Save', 'check', 'save-pin', '', 'primary')}${p.link ? btn('Open the link', 'link', 'toast', 'Opened in the browser') : ''}</div>`;
+        btns(btn('Save', 'check', 'save-pin', '', 'primary'), p.link ? btn('Open the link', 'link', 'toast', 'Opened in the browser') : '');
     }
   },
 
   tools: {
+    actions: () => ibtn('refresh', 'Check again', 'recheck'),
     body(S) {
       const up = piUp(S), low = S.power === 'low', gone = S.drive !== 'ok';
       const state = !up ? ['idle', 'The Raspberry Pi is offline'] : low ? ['warn', 'Power is low'] : gone ? ['warn', 'One drive is disconnected'] : ['good', 'Everything is ready'];
       const svc = (title, symbol, id) => row({ icon: symbol, title, status: up ? ['good', 'Ready'] : ['idle', 'Offline'], act: 'sheet', arg: `service|${id}`, opens: true });
       return lead(...state) + offlineNotice(S) +
-        `<div class="btns">${btn('Check again', 'refresh', 'recheck', '', 'primary')}</div>` +
         section('Raspberry Pi', group(
           svc('Media', 'media', 'media') + svc('Assistant', 'chat', 'assistant') + svc('Camera', 'camera', 'camera') +
           row({ icon: 'power', title: 'Power', status: !up ? ['idle', 'Offline'] : low ? ['warn', 'Low power'] : ['good', 'Ready'], act: 'sheet', arg: 'power', opens: true }) +
           row({ icon: 'files', title: 'Drives', status: !up ? ['idle', 'Offline'] : gone ? ['warn', '1 of 2 connected'] : ['good', '2 connected'], act: 'view', arg: 'media|Access', opens: true }))) +
         section('This phone', group(
           row({ icon: 'cpu', title: 'Process monitor', sub: 'Memory, processor, temperature', act: 'go', arg: 'process', opens: true }) +
-          row({ icon: 'launcher', title: 'Widgets', sub: 'Launcher widgets, tiles and shortcuts', act: 'go', arg: 'widgets', opens: true }))) +
+          row({ icon: 'launcher', title: 'Widgets', sub: 'Widgets, tiles, shortcuts and the share menu', act: 'go', arg: 'widgets', opens: true }))) +
         section('This app', group(S.update
           ? row({ icon: 'download', title: 'Update to 2.35', sub: up ? 'Waiting on the Pi' : 'The Pi is offline', act: 'sheet', arg: 'update', opens: true, off: !up })
           : row({ icon: 'check', title: 'csync 2.35', sub: 'Up to date' })));
@@ -408,22 +376,21 @@ const SCREENS = {
   },
 
   process: {
+    actions: S => ibtn('refresh', 'Check again', S.shizuku ? 'toast' : 'shizuku-on', S.shizuku ? 'Read just now' : ''),
     body(S) {
-      if (!S.shizuku) {
-        return notice('info', 'Live readings need Shizuku to be running on this phone.', btn('Open Shizuku', 'open', 'toast', 'Opened Shizuku')) +
-          `<div class="btns">${btn('Check again', 'refresh', 'shizuku-on', '', 'primary')}</div>`;
-      }
-      return `<div class="btns">${btn('Check again', 'refresh', 'toast', 'Read just now', 'primary')}</div>` +
-        `<div class="tiles">${tile({ icon: 'memory', title: 'Memory free', big: '4.8 GB', small: 'Falling over the last hour' })}${tile({ icon: 'cpu', title: 'Processor', big: '17%', small: 'Level over the last hour' })}${tile({ icon: 'thermo', title: 'Temperature', big: '36°', small: 'Level over the last hour' })}${tile({ icon: 'files', title: 'Swap in use', big: '1.1 GB', small: 'Rising over the last hour' })}</div>` +
+      if (!S.shizuku) return notice('info', 'Live readings need Shizuku to be running on this phone.', btn('Open Shizuku', 'open', 'toast', 'Opened Shizuku'));
+      return tiles(tile({ icon: 'memory', title: 'Memory free', big: '4.8 GB', small: 'Falling over the last hour' }) + tile({ icon: 'cpu', title: 'Processor', big: '17%', small: 'Level over the last hour' }) +
+        tile({ icon: 'thermo', title: 'Temperature', big: '36°', small: 'Level over the last hour' }) + tile({ icon: 'files', title: 'Swap in use', big: '1.1 GB', small: 'Rising over the last hour' })) +
         section('Busiest apps', group(BUSY_APPS.map(a => row({ icon: 'device', title: a.name, sub: `${a.memory} · ${a.cpu} processor`, act: 'sheet', arg: `app|${a.name}`, opens: true })).join('')));
     }
   },
 
   widgets: {
     body(S) {
-      const rows = kind => group(WIDGETS.filter(w => w.kind === kind).map(w => row({ icon: w.icon, title: w.name, sub: w.shows, status: S.widgets.includes(w.name) ? ['good', 'Added'] : ['idle', 'Not added'], act: 'sheet', arg: `widget|${w.name}`, opens: true })).join(''));
-      return section('Launcher widgets', rows('Launcher widget')) + section('Quick Settings tiles', rows('Quick Settings tile')) +
-        section('App shortcuts', group(row({ icon: 'launcher', title: 'Media, Share and Chat', sub: 'Press and hold the csync icon on your launcher' })));
+      const placed = kind => group(WIDGETS.filter(w => w.kind === kind).map(w => row({ icon: w.icon, title: w.name, sub: w.shows, status: S.widgets.includes(w.name) ? ['good', 'Added'] : ['idle', 'Not added'], act: 'sheet', arg: `widget|${w.name}`, opens: true })).join(''));
+      const always = kind => group(WIDGETS.filter(w => w.kind === kind).map(w => row({ icon: w.icon, title: w.name, sub: w.shows, act: 'sheet', arg: `widget|${w.name}`, opens: true })).join(''));
+      return section('Launcher widgets', placed('Launcher widget')) + section('Quick Settings tiles', placed('Quick Settings tile')) +
+        section('App shortcuts', always('App shortcut')) + section('In the share menu of other apps', always('Share menu entry'));
     }
   },
 
@@ -450,7 +417,7 @@ const SCREENS = {
           labelled('Second address (optional)', field({ id: 'conn.second', hint: 'studio-mac', value: c.second, icon: 'laptop' }), 'A device that is usually on. It finds your devices when the Pi is off.') +
           labelled('Access token', field({ id: 'conn.token', hint: 'Token', value: c.token, icon: 'key', secret: !S.showToken, end: ibtn('eye', S.showToken ? 'Hide the token' : 'Show the token', 'toggle', 'showToken', S.showToken ? 'on' : 'quiet', 17) }), 'The same token on every device you own.') +
           labelled("This phone's name", field({ id: 'conn.name', hint: 'pixel-8', value: c.name, icon: 'device' }))) +
-        `<div class="btns">${btn('Save', 'check', 'toast', 'Connection saved', 'primary')}</div>`;
+        btns(btn('Save', 'check', 'toast', 'Connection saved', 'primary'));
     }
   },
 
@@ -477,26 +444,29 @@ const SCREENS = {
 
   appearance: {
     body(S) {
-      const swatches = ACCENTS.map(a => `<button type="button" class="swatch" style="--c:${a.fill}" aria-pressed="${S.accent === a.id}" aria-label="${a.name}" title="${a.name}" ${on('accent', a.id)}>${S.accent === a.id ? icon('check', 18) : ''}</button>`).join('') +
-        `<button type="button" class="swatch custom${S.custom ? ' set' : ''}" style="--c:${S.custom || 'transparent'}" aria-pressed="${S.accent === 'custom'}" aria-label="Your own colour" title="Your own colour" ${on('sheet', 'custom')}>${icon(S.accent === 'custom' ? 'check' : 'palette', 18)}</button>`;
       return labelled('Theme', seg([['System', 'system'], ['Light', 'sun'], ['Dark', 'moon']], S.theme === 'system' ? 'System' : S.theme === 'dark' ? 'Dark' : 'Light', 'theme', 'Theme')) +
         labelled('Text size', seg([['Small', 'text-s'], ['Medium', 'text-m'], ['Large', 'text-l']], { sm: 'Small', md: 'Medium', lg: 'Large' }[S.size], 'size', 'Text size')) +
-        labelled('Primary colour', `<div class="swatches">${swatches}</div>`) +
-        `<p class="note-line">${icon('device', 14)}${icon('screen', 14)}Applies to every screen and the system bars.</p>`;
+        labelled('Primary colour', swatches(ACCENTS, S.accent, S.custom)) +
+        noteLine(['device', 'screen'], 'Applies to every screen and the system bars.');
     }
   },
 
   guide: {
     body() {
-      return `<div class="card">${markdown('## Ask\n\nFind a film, ask what is playing, or check how the Pi is doing.\n\n- What is on the Pi screen?\n- Find the knot tutorials shorter than five minutes\n- Is the Pi running hot?\n\n## Act\n\nThe assistant names the output or the device before it acts, the same way the app does.\n\n- Play Walk in the hills on the Pi screen\n- Send the projector note to studio-mac\n- Take a photo with the Pi camera\n\n## Keep\n\nIt can read and write your notes on the Pi.')}</div>` +
-        `<div class="btns">${btn('See what it can use', 'clipboard', 'sheet', 'tools')}</div>`;
+      return card(markdown('## Ask\n\nFind a film, ask what is playing, or check how the Pi is doing.\n\n- What is on the Pi screen?\n- Find the knot tutorials shorter than five minutes\n- Is the Pi running hot?\n\n## Act\n\nThe assistant names the output or the device before it acts, the same way the app does.\n\n- Play Walk in the hills on the Pi screen\n- Send the projector note to studio-mac\n- Take a photo with the Pi camera\n\n## Keep\n\nIt can read and write your notes on the Pi.')) +
+        btns(btn('See what it can use', 'clipboard', 'sheet', 'tools'));
     }
   },
 
   help: {
     body(S) {
-      return `<div class="card">${markdown('## Where things live\n\n**Media** browses the drives and plays on the Pi screen or this phone. **Share** sends to your devices. **Chat** talks to the Pi assistant. **More** holds the camera, notes, tools and settings.\n\n## When something does not work\n\nOpen **More**, then **Tools**. It shows how the Pi is doing right now. If the Pi cannot be reached at all, open **Settings**, then **Connection**.')}</div>` +
-        group(row({ icon: 'info', title: 'csync', value: S.update ? '2.34' : '2.35' }) + row({ icon: 'pi', title: 'Raspberry Pi', value: S.conn.pi }));
+      return card(markdown('## Where things live\n\n**Media** browses the drives and plays on the Pi screen or this phone. **Share** sends to your devices. **Chat** talks to the Pi assistant. **More** holds the camera, notes, tools and settings.\n\n## When something does not work\n\nOpen **More**, then **Tools**. It shows how the Pi is doing right now. If the Pi cannot be reached at all, open **Settings**, then **Connection**.')) +
+        group(row({ icon: 'info', title: 'csync', value: S.update ? '2.34' : '2.35' }) + row({ icon: 'pi', title: 'Raspberry Pi', value: S.conn.pi }) +
+          row({ icon: 'palette', title: 'Design system', sub: 'Every part this app is built from', act: 'go', arg: 'showcase', opens: true }));
     }
+  },
+
+  showcase: {
+    body: S => showcaseBody(S)
   }
 };

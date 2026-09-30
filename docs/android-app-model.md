@@ -94,6 +94,7 @@ More
 │  └─ Appearance
 ├─ Assistant guide
 └─ Help and about
+   └─ Design system            every part the app is built from
 ```
 
 The rule that decides where a place lives: if it is not one of the five bar
@@ -275,20 +276,29 @@ wherever it appears (M-10, N-08, N-09). The mock builds every item sheet from
 | Action | Video, audio | Image | Document | Text | Link | Folder |
 |---|---|---|---|---|---|---|
 | Play on Pi screen, Play on this phone | yes | | | | yes | |
+| Show on Pi screen | | yes | yes | yes | | |
+| Open (look at it here) | | yes | yes | | | yes |
 | Open in VLC | video | | | | | |
-| Show on Pi screen | | yes | | | | |
 | Set as the Pi cover | | yes | | | | |
-| Open | | | | | | yes |
 | Copy the text | | | | yes | | |
-| Save on this phone | yes | yes | yes | | | yes |
 | Send to a device | yes | yes | yes | yes | yes | yes |
 | Send to a conversation | yes | yes | yes | yes | yes | |
-| Add to a note | | yes | | yes | yes | |
-| Save as a pin | | | | yes | yes | |
+| Add to a note | yes | yes | yes | yes | yes | |
+| Save as a pin | yes | yes | yes | yes | yes | |
+| Save on this phone | yes | yes | yes | | | yes |
 | Share with another app | yes | yes | yes | yes | yes | yes |
 
-File details is added for items that live on a drive, and Delete for
-captures.
+Every kind but a folder can go to five places: the Pi screen, a device, a
+conversation, a note and a pin (owner, 2026-09-30). From another app shows
+those five and leaves out Save on this phone, Open and Share with another
+app, because the item came from this phone. File details is added for items
+that live on a drive, Delete for captures, and Take out of this note for an
+item inside a note. Share with another app opens Android's own share menu.
+
+csync puts three entries in the share menu of other apps: csync (asks where
+the item goes), Send to Pi screen (no question), and Send to your last
+device. They are listed on the Widgets page with the widgets, tiles and
+shortcuts.
 
 ## 8. Words on screen
 

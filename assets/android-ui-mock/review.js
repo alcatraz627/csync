@@ -26,31 +26,31 @@ function toggleSession(s, output, title, at, total, source) {
 const PLACE_SHEETS = {
   home: ['resume|0', 'device|Raspberry Pi', 'device|work-macbook'],
   search: [],
-  media: ['item|Walk in the hills', 'item|Desk at sunset', 'item|Projector manual', 'folder|Films', 'details|Walk in the hills', 'to-device|video|Walk in the hills', 'to-chat|video|Walk in the hills', 'source', 'resume|1'],
-  'pi-screen': ['youtube', 'volume|Pi screen', 'speed|Pi screen', 'skip|Pi screen', 'move|Pi screen', 'replace|Pi screen|Walk in the hills'],
+  media: ['item|Walk in the hills', 'item|Desk at sunset', 'item|Projector manual', 'folder|Films', 'details|Walk in the hills', 'view|image|Desk at sunset', 'to-device|video|Walk in the hills', 'to-chat|video|Walk in the hills', 'to-note|video|Walk in the hills', 'share-out|Walk in the hills', 'source', 'resume|1'],
+  'pi-screen': ['youtube', 'cast|screen', 'cast|app', 'slideshow', 'show-note', 'volume|Pi screen', 'speed|Pi screen', 'skip|Pi screen', 'move|Pi screen', 'replace|Pi screen|Walk in the hills'],
   'phone-player': ['move|This phone'],
   covers: [],
   share: ['recipient', 'attach', 'clipboard', 'sent|0'],
   received: ['received|0', 'received|1', 'received|2'],
   incoming: ['to-device|link|F-Droid 2.0, the biggest update in years'],
   chat: ['model|default'],
-  conversation: ['chat-add', 'model|chat', 'fork|2', 'result|2|1', 'result|2|0'],
+  conversation: ['chat-add', 'model|chat', 'export-chat', 'fork|2', 'result|2|1', 'result|2|0', 'result|4|0'],
   more: [], camera: [],
   captures: ['capture|c1', 'capture|c2', 'delete-capture|c1'],
-  notes: [], note: ['share-note', 'delete-note'], pin: ['share-pin', 'delete-pin'],
+  notes: [], note: ['share-note', 'note-item|0', 'note-add', 'drop-note-item|0', 'delete-note'], pin: ['share-pin', 'delete-pin'],
   tools: ['power', 'service|media', 'update'],
   process: ['app|Chrome', 'stop-app|Chrome'],
-  widgets: ['widget|xkcd', 'widget|Media remote'], settings: [], connection: ['device|studio-mac', 'forget|studio-mac'],
+  widgets: ['widget|xkcd', 'widget|Media remote', 'widget|Send to Pi screen'], settings: [], connection: ['device|studio-mac', 'forget|studio-mac'],
   playback: ['start-volume', 'skip|default'],
   assistant: ['model|default'],
-  appearance: ['custom'], guide: ['tools'], help: []
+  appearance: ['custom'], guide: ['tools'], help: [], showcase: []
 };
 const NEEDS_SESSION = { 'pi-screen': 'Pi screen', 'phone-player': 'This phone' };
 
 const sheetName = spec => {
   const [type, ...rest] = spec.split('|');
-  const names = { item: 'Item', folder: 'Folder', details: 'File details', source: 'Choose a source', resume: 'Resume', device: 'Device', recipient: 'Send to', attach: 'Attach a file', clipboard: 'Clipboard', sent: 'A sent item', received: 'A received item', 'to-chat': 'Send to a conversation', youtube: 'YouTube link', volume: 'Volume', speed: 'Speed', skip: 'Skip length', move: 'Move output', replace: 'Replace playback', 'chat-add': 'Add to message', model: 'Model and thinking', fork: 'Fork', result: 'Assistant result', capture: 'Capture', 'delete-capture': 'Delete capture', 'share-note': 'Send note', 'delete-note': 'Delete note', 'share-pin': 'Send pin', 'delete-pin': 'Delete pin', power: 'Power', service: 'Service', update: 'Update', app: 'App', 'stop-app': 'Stop app', 'start-volume': 'Starting volume', custom: 'Own colour', 'to-device': 'Send to a device', tools: 'Assistant tools', widget: 'Widget', forget: 'Forget device' };
-  const detail = rest.filter(r => !/^\d+$/.test(r) && !['Pi screen', 'This phone', 'default', 'chat', 'video', 'image', 'link', 'text', 'doc'].includes(r))[0];
+  const names = { item: 'Item', folder: 'Folder', details: 'File details', source: 'Choose a source', resume: 'Resume', device: 'Device', recipient: 'Send to', attach: 'Attach a file', clipboard: 'Clipboard', sent: 'A sent item', received: 'A received item', 'to-chat': 'Send to a conversation', youtube: 'YouTube link', volume: 'Volume', speed: 'Speed', skip: 'Skip length', move: 'Move output', replace: 'Replace playback', 'chat-add': 'Add to message', model: 'Model and thinking', fork: 'Fork', result: 'Assistant result', capture: 'Capture', 'delete-capture': 'Delete capture', 'share-note': 'Send note', 'delete-note': 'Delete note', 'share-pin': 'Send pin', 'delete-pin': 'Delete pin', power: 'Power', service: 'Service', update: 'Update', app: 'App', 'stop-app': 'Stop app', 'start-volume': 'Starting volume', custom: 'Own colour', 'to-device': 'Send to a device', tools: 'Assistant tools', widget: 'Widget', forget: 'Forget device', view: 'Open an item', 'to-note': 'Add to a note', 'share-out': 'Android share menu', cast: 'Show this phone', slideshow: 'Slideshow', 'show-note': 'Show a note', 'export-chat': 'Save the conversation', 'note-item': 'Item in a note', 'note-add': 'Add to a note, from the note', 'drop-note-item': 'Take out of a note' };
+  const detail = rest.filter(r => !/^\d+$/.test(r) && !['Pi screen', 'This phone', 'default', 'chat', 'video', 'image', 'link', 'text', 'doc', 'screen'].includes(r))[0];
   return names[type] + (detail ? `: ${detail}` : rest[0] && ['default', 'chat'].includes(rest[0]) ? `, ${rest[0]}` : '');
 };
 
@@ -66,7 +66,8 @@ const CHANGES = {
   received: ['A child page of Share with its own path and Back.'],
   incoming: ['The same action list as everywhere else, chosen by the kind of item (N-09).', 'Playback options are editable before it starts (SH-08).', 'Back returns to the app you shared from.'],
   chat: ['A bar place: no Back arrow.', 'Tools uses the same names as the assistant guide.', 'Empty states say what belongs there.'],
-  conversation: ['Favorite and Archive sit on the title row (CH-17).', 'Your messages use a tint, not a solid accent block.', 'Model and thinking need Save (CH-13).'],
+  conversation: ['Favorite and Archive sit on the title row (CH-17).', 'Your messages use a tint, not a solid accent block.', 'Model and thinking need Save (CH-13).', 'Tap a message for Copy, Regenerate or Edit, and Fork, as one tight strip.', 'Each tool result is a card drawn for its kind, and a media card carries Pause and Stop.', 'One message box holds the text, attachments, the model and Send. It grows, and opens taller.', 'The top bar saves the conversation as Markdown or as an image.'],
+  showcase: ['New. Every part the app is built from, drawn by the part itself.'],
   more: ['Notes lives here with the other places that are not in the bar.', 'Tools shows its state on the row.'],
   camera: ['Captures and Show on Pi screen are named rows under the shutter.', 'Connecting shows a moving placeholder, not an empty box.'],
   captures: ['Grouped by day. Title is the kind, the line under it is time and size.'],
@@ -85,7 +86,7 @@ const CHANGES = {
   help: ['Where things live, and the version.']
 };
 
-const reviewState = { wall: false };
+const reviewState = { wall: false, system: false };
 
 function renderRail() {
   const depth = id => pathTo(id).length - 1;
@@ -106,6 +107,8 @@ function renderInspector() {
 function renderTop() {
   for (const b of document.querySelectorAll('[data-theme-set]')) b.classList.toggle('on', b.dataset.themeSet === S.theme);
   for (const b of document.querySelectorAll('[data-size-set]')) b.classList.toggle('on', b.dataset.sizeSet === S.size);
+  for (const b of document.querySelectorAll('[data-tabs-set]')) b.classList.toggle('on', b.dataset.tabsSet === S.tabs);
+  document.querySelector('#system-toggle').classList.toggle('on', reviewState.system);
   document.querySelector('#wall-toggle').classList.toggle('on', reviewState.wall);
   document.querySelector('#wall-toggle').textContent = reviewState.wall ? 'Back to one screen' : 'Show every screen';
 }
@@ -155,7 +158,11 @@ function frames() {
   add('Share', 'Received, empty', 'received', s => { s.received = []; });
   add('Chat', 'Chat, searching', 'chat', s => { s.chatSearch = true; s.chatQuery = 'clip'; });
   add('Chat', 'Chat, Pi offline', 'chat', s => { s.pi = 'offline'; });
+  add('Media', 'Pi screen, showing this phone', 'pi-screen', session('Pi screen', { title: "This phone's screen", source: 'This phone', live: true }));
   add('Chat', 'Conversation, message picked', 'conversation', s => { s.pickedMsg = 2; });
+  add('Chat', 'Conversation, your message picked', 'conversation', s => { s.pickedMsg = 0; });
+  add('Chat', 'Conversation, every kind of result', 'conversation', s => { s.threadId = 't2'; }, true);
+  add('Chat', 'Conversation, result while it plays', 'conversation', session('Pi screen'));
   add('Chat', 'Conversation, title being edited', 'conversation', s => { s.editingTitle = true; });
   add('Chat', 'Conversation, long draft', 'conversation', s => { s.draft = 'Find the three shortest tutorials.\nPlay the first on the Pi screen.\nThen tell me how long the others are.'; s.draftOpen = true; });
   add('Chat', 'Conversation, with attachment', 'conversation', s => { s.chatAttachment = { kind: 'Image', title: 'IMG 4410.jpg' }; });
@@ -178,7 +185,7 @@ function frames() {
 
 function frameState(f) {
   const s = freshState();
-  Object.assign(s, { theme: S.theme, size: S.size, accent: S.accent, custom: S.custom, place: f.place });
+  Object.assign(s, { theme: S.theme, size: S.size, accent: S.accent, custom: S.custom, tabs: S.tabs, place: f.place });
   f.change(s);
   return s;
 }
@@ -203,16 +210,20 @@ function renderWall() {
 
 function renderReview() {
   renderTop();
-  document.querySelector('#one').hidden = reviewState.wall;
+  document.querySelector('#one').hidden = reviewState.wall || reviewState.system;
   document.querySelector('#wall').hidden = !reviewState.wall;
+  document.querySelector('#system').hidden = !reviewState.system;
+  if (reviewState.system) return renderSystem();
   if (reviewState.wall) return renderWall();
   renderRail();
   renderInspector();
 }
 
 document.addEventListener('click', event => {
-  const t = event.target.closest('[data-go],[data-state],[data-sheet],[data-theme-set],[data-size-set],[data-frame],#wall-toggle,#reset');
+  const t = event.target.closest('[data-go],[data-state],[data-sheet],[data-theme-set],[data-size-set],[data-tabs-set],[data-frame],#wall-toggle,#system-toggle,#reset');
   if (!t || phone.contains(t)) return;
+  if (t.dataset.tabsSet) { S.tabs = t.dataset.tabsSet; return render(); }
+  if (t.id === 'system-toggle') { reviewState.system = !reviewState.system; reviewState.wall = false; return render(); }
   if (t.dataset.go) return go(t.dataset.go);
   if (t.dataset.state) { STATES[t.dataset.state][2](S); return render(); }
   if (t.dataset.sheet) {
@@ -225,8 +236,8 @@ document.addEventListener('click', event => {
   if (t.dataset.themeSet) { S.theme = t.dataset.themeSet; return render(); }
   if (t.dataset.sizeSet) { S.size = t.dataset.sizeSet; return render(); }
   if (t.dataset.frame) { const f = frames()[t.dataset.frame], keep = { theme: S.theme, size: S.size, accent: S.accent, custom: S.custom }; S = Object.assign(frameState(f), keep); reviewState.wall = false; return render(false); }
-  if (t.id === 'wall-toggle') { reviewState.wall = !reviewState.wall; return render(); }
-  if (t.id === 'reset') { const keep = { theme: S.theme, size: S.size }; S = Object.assign(freshState(), keep); reviewState.wall = false; return render(false); }
+  if (t.id === 'wall-toggle') { reviewState.wall = !reviewState.wall; reviewState.system = false; return render(); }
+  if (t.id === 'reset') { const keep = { theme: S.theme, size: S.size }; S = Object.assign(freshState(), keep); reviewState.wall = reviewState.system = false; return render(false); }
 });
 addEventListener('resize', () => { if (reviewState.wall) renderWall(); });
 

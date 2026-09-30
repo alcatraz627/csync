@@ -1,5 +1,6 @@
 // Every sheet in the app. A sheet is a short choice, one value to adjust, a
 // confirmation, or the facts about one row. Anything larger is a page.
+// Like the screens, a sheet is built only from the parts in kit.js.
 
 const findItem = title => [...Object.values(LIBRARY).flat(), ...VIDEOS].find(i => i.title === title) || { kind: 'video', title, file: title, size: '' };
 const outputWords = output => output === 'Pi screen' ? 'Pi screen' : 'this phone';
@@ -18,30 +19,32 @@ function playRows(S, title, verb = 'Play') {
 /**
  * What one kind of item can do. Every sheet and the From another app page draw
  * from this list, so the same item offers the same actions wherever it appears.
- * kind: video, audio, image, doc, text, link or folder.
+ * kind: video, audio, image, doc, text, link or folder. Every kind but a folder
+ * can go to the Pi screen, a device, a conversation, a note and a pin.
  */
 function itemActions(S, item) {
   const { kind, title } = item, up = piUp(S);
-  const plays = ['video', 'audio', 'link'].includes(kind);
+  const plays = ['video', 'audio', 'link'].includes(kind), shows = ['image', 'doc', 'text'].includes(kind);
   const first = [
     plays && playRows(S, title),
-    kind === 'video' && row({ icon: 'open', title: 'Open in VLC', sub: 'Hands the file to VLC on this phone', act: 'toast', arg: 'Opened in VLC' }),
-    kind === 'image' && row({ icon: 'screen', title: 'Show on Pi screen', sub: up ? '' : 'The Pi is offline', off: !up, act: 'play', arg: `Pi screen|${title}` }),
-    kind === 'image' && row({ icon: 'image', title: 'Set as the Pi cover', sub: up ? '' : 'The Pi is offline', off: !up, act: 'set-cover', arg: title }),
+    shows && row({ icon: 'screen', title: 'Show on Pi screen', sub: up ? '' : 'The Pi is offline', off: !up, act: 'play', arg: `Pi screen|${title}|0|1|Shown` }),
+    ['image', 'doc'].includes(kind) && !item.incoming && row({ icon: 'eye', title: 'Open', sub: 'Look at it here', act: 'sheet', arg: `view|${kind}|${title}`, opens: true }),
+    kind === 'video' && !item.incoming && row({ icon: 'open', title: 'Open in VLC', sub: 'Hands the file to VLC on this phone', act: 'toast', arg: 'Opened in VLC' }),
+    kind === 'image' && item.is !== 'export' && row({ icon: 'image', title: 'Set as the Pi cover', sub: up ? '' : 'The Pi is offline', off: !up, act: 'set-cover', arg: title }),
     kind === 'folder' && row({ icon: 'folder', title: 'Open', act: 'folder', arg: title }),
     kind === 'text' && row({ icon: 'copy', title: 'Copy the text', act: 'toast', arg: 'Copied' })
   ].filter(Boolean).join('');
   const rest = [
-    !['text', 'link'].includes(kind) && row({ icon: 'download', title: 'Save on this phone', sub: kind === 'folder' ? 'Everything inside it' : '', act: 'toast', arg: `Saving ${title}` }),
     row({ icon: 'devices', title: 'Send to a device', act: 'sheet', arg: `to-device|${kind}|${title}`, opens: true }),
     kind !== 'folder' && row({ icon: 'chat', title: 'Send to a conversation', act: 'sheet', arg: `to-chat|${kind}|${title}`, opens: true }),
-    ['image', 'text', 'link'].includes(kind) && item.is !== 'note' && row({ icon: 'note', title: 'Add to a note', act: 'toast', arg: 'Added to a new note' }),
-    ['text', 'link'].includes(kind) && item.is !== 'pin' && row({ icon: 'pin', title: 'Save as a pin', act: 'toast', arg: 'Saved to Pins' }),
-    row({ icon: 'open', title: 'Share with another app', act: 'toast', arg: 'Opened the Android share menu' }),
+    kind !== 'folder' && item.is !== 'note' && row({ icon: 'note', title: 'Add to a note', act: 'sheet', arg: `to-note|${kind}|${title}`, opens: true }),
+    kind !== 'folder' && item.is !== 'pin' && row({ icon: 'pin', title: 'Save as a pin', act: 'toast', arg: 'Saved to Pins' }),
+    !['text', 'link'].includes(kind) && !item.incoming && row({ icon: 'download', title: 'Save on this phone', sub: kind === 'folder' ? 'Everything inside it' : '', act: 'toast', arg: `Saving ${title}` }),
+    !item.incoming && row({ icon: 'open', title: 'Share with another app', act: 'sheet', arg: `share-out|${title}`, opens: true }),
     item.details && row({ icon: 'info', title: 'File details', act: 'sheet', arg: `details|${title}`, opens: true }),
-    item.remove && row({ icon: 'trash', danger: true, title: 'Delete', act: 'sheet', arg: item.remove, opens: true })
+    item.remove && row({ icon: 'trash', danger: true, title: item.removeWords || 'Delete', act: 'sheet', arg: item.remove, opens: true })
   ].filter(Boolean).join('');
-  return { first, rest, firstLabel: plays ? 'Play' : kind === 'image' ? 'Show' : '', restLabel: first ? 'Also' : '' };
+  return { first, rest, firstLabel: plays ? 'Play' : shows ? 'Show' : '', restLabel: first ? (item.incoming ? 'Keep or send' : 'Also') : '' };
 }
 
 function actionGroups(S, item) {
@@ -49,17 +52,18 @@ function actionGroups(S, item) {
   return (a.first ? (a.firstLabel ? section(a.firstLabel, group(a.first)) : group(a.first)) : '') + (a.restLabel ? section(a.restLabel, group(a.rest)) : group(a.rest));
 }
 
-const actionSheet = (S, item, sub, lead = '') => sheet({ title: item.title, sub, body: lead + actionGroups(S, item) });
+const actionSheet = (S, item, sub, top = '') => sheet({ title: item.title, sub, body: top + actionGroups(S, item) });
 
 const kindOf = name => ({ Image: 'image', Video: 'video', Text: 'text', File: 'doc', Link: 'link', YouTube: 'link', Instagram: 'link' }[name] || name);
+const splitItem = arg => { const [kind, ...rest] = arg.split('|'); return [kind, rest.join('|')]; };
 
 function deviceRows(S, act) {
   return group(DEVICES.filter(d => !d.self).sort((a, b) => b.online - a.online).map(d =>
     row({ icon: deviceIcon(d), title: d.name, status: d.hub && !piUp(S) ? ['idle', 'Offline'] : deviceStatus(d), picked: d.name === S.recipient, act, arg: d.name })).join(''));
 }
 
-const slider = (name, label, value, min, max, step, shown, low, high, output = '') =>
-  `<div class="labelled"><span data-live="${name}">${shown}</span><input class="range" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-in="${name}" data-arg="${esc(output)}" aria-label="${label}"><div class="range-ends"><span>${low}</span><span>${high}</span></div></div>`;
+const percent = v => v === 0 ? 'Muted' : v + '%';
+const exportName = S => `${thread(S).title}.${S.exportFormat === 'Image' ? 'png' : 'md'}`;
 
 const SHEETS = {
 
@@ -71,6 +75,12 @@ const SHEETS = {
   details(S, title) {
     const it = findItem(title);
     return sheet({ title, sub: 'File details', body: facts([['File name', it.file || title], ['Kind', it.kind], it.length && ['Length', it.length], it.size && ['Size', it.size], ['Drive', S.source], ['Folder', it.folder || S.folder || 'Top level']]) });
+  },
+
+  view(S, arg) {
+    const [kind, title] = splitItem(arg);
+    return sheet({ title, sub: KIND_WORDS[kind], body: kind === 'image' ? picture({ icon: 'photo', size: 44, mode: 'live' })
+      : card(markdown('## Setting up\n\nPut the projector on a level surface two metres from the wall.\n\n- HDMI 2 is the Pi\n- HDMI 1 is the laptop dock')) });
   },
 
   folder(S, name) {
@@ -91,13 +101,13 @@ const SHEETS = {
   replace(S, arg) {
     const [output, title] = arg.split('|'), now = S.sessions[output];
     return sheet({ title: `Replace what is on ${output === 'Pi screen' ? 'the Pi screen' : 'this phone'}?`, sub: `${now.title} stops and ${title} starts.`,
-      body: '', acts: btn('Keep playing', 'back', 'close-sheet') + btn('Replace', 'play', 'play-now', arg, 'primary') });
+      body: '', acts: btn('Keep playing', 'back', 'close-sheet') + btn('Replace', 'play', 'play-now', arg, 'tonal') });
   },
 
   move(S, from) {
     const s = S.sessions[from], to = from === 'Pi screen' ? 'This phone' : 'Pi screen', up = piUp(S) || to === 'This phone';
     return sheet({ title: `Move to ${to === 'Pi screen' ? 'the Pi screen' : 'this phone'}`, sub: `${s.title} carries on from ${clock(s.at)}.`,
-      body: up ? '' : notice('bad', 'The Pi is offline.'), acts: btn('Stay here', 'back', 'close-sheet') + btn('Move', to === 'Pi screen' ? 'screen' : 'device', 'move', from, 'primary', up ? '' : 'disabled') });
+      body: up ? '' : notice('bad', 'The Pi is offline.'), acts: btn('Stay here', 'back', 'close-sheet') + btn('Move', to === 'Pi screen' ? 'screen' : 'device', 'move', from, 'tonal', up ? '' : 'disabled') });
   },
 
   source(S) {
@@ -111,16 +121,28 @@ const SHEETS = {
   recipient(S) { return sheet({ title: 'Send to', body: deviceRows(S, 'pick-recipient') }); },
 
   'to-device'(S, arg) {
-    const [kind, ...rest] = arg.split('|'), title = rest.join('|'), to = device(S, S.recipient), up = to.hub ? piUp(S) : to.online;
+    const [kind, title] = splitItem(arg), to = device(S, S.recipient), up = to.hub ? piUp(S) : to.online;
     return sheet({ title: 'Send to a device', sub: title, body: deviceRows(S, 'pick-recipient-stay') + (up ? '' : notice('warn', `${to.name} is offline and cannot receive anything now.`)),
       acts: btn(`Send to ${to.name}`, 'send', 'send-item', `${kind}|${title}`, 'primary', up ? '' : 'disabled') });
   },
 
   'to-chat'(S, arg) {
-    const [kind, ...rest] = arg.split('|'), title = rest.join('|') || 'Shared item';
+    const [kind, title] = splitItem(arg);
     return sheet({ title: 'Send to a conversation', sub: 'It is added to the message you write next. Nothing is sent yet.', body: group(
-      S.threads.filter(t => !t.archived).map(t => row({ icon: 'chat', title: t.title, sub: day(t.when), act: 'attach-chat', arg: `${t.id}|${kind}|${title}`, opens: true })).join('') +
-      row({ icon: 'plus', title: 'A new conversation', act: 'attach-chat', arg: `new|${kind}|${title}`, opens: true })) });
+      S.threads.filter(t => !t.archived).map(t => row({ icon: 'chat', title: t.title, sub: day(t.when), act: 'attach-chat', arg: `${t.id}|${kind}|${title || 'Shared item'}`, opens: true })).join('') +
+      row({ icon: 'plus', title: 'A new conversation', act: 'attach-chat', arg: `new|${kind}|${title || 'Shared item'}`, opens: true })) });
+  },
+
+  'to-note'(S, arg) {
+    const [kind, title] = splitItem(arg);
+    return sheet({ title: 'Add to a note', sub: title, body: group(
+      S.notes.map(n => row({ icon: 'note', title: n.title, sub: n.edited, act: 'add-to-note', arg: `${n.id}|${kind}|${title}` })).join('') +
+      row({ icon: 'plus', title: 'A new note', act: 'add-to-note', arg: `new|${kind}|${title}` })) });
+  },
+
+  'share-out'(S, title) {
+    return sheet({ title: 'Share with another app', sub: title, body: appTiles(SHARE_APPS, 'shared-out') +
+      noteLine('open', "This is Android's own share menu. csync hands over the item and its name.") });
   },
 
   device(S, name) {
@@ -143,8 +165,7 @@ const SHEETS = {
   },
 
   clipboard(S) {
-    const shown = S.clip.kind === 'Image' ? `<div class="picture live">${icon('photo', 36)}</div>` : `<div class="card">${esc(S.clip.body)}</div>`;
-    return sheet({ title: 'On the clipboard', sub: S.clip.sub, body: shown,
+    return sheet({ title: 'On the clipboard', sub: S.clip.sub, body: S.clip.kind === 'Image' ? picture({ icon: 'photo', mode: 'live' }) : card(esc(S.clip.body)),
       acts: btn('Add to message', 'clipboard', 'use-clip', '') + btn('Send', 'send', 'send-clip', '', 'primary', device(S, S.recipient).online ? '' : 'disabled') });
   },
 
@@ -156,17 +177,17 @@ const SHEETS = {
 
   received(S, index) {
     const r = S.received[index];
-    return actionSheet(S, { kind: kindOf(r.kind), title: r.title }, `From ${r.from} · ${day(r.when)}, ${r.time}`, r.body ? `<div class="card">${esc(r.body)}</div>` : '');
+    return actionSheet(S, { kind: kindOf(r.kind), title: r.title }, `From ${r.from} · ${day(r.when)}, ${r.time}`, r.body ? card(esc(r.body)) : '');
   },
 
   volume(S, output) {
     const v = S.sessions[output].volume;
-    return sheet({ title: 'Volume', sub: output === 'Pi screen' ? 'Pi screen' : 'This phone', body: slider('volume', 'Volume', v, 0, 100, 5, v === 0 ? 'Muted' : v + '%', 'Muted', '100%', output) });
+    return sheet({ title: 'Volume', sub: output === 'Pi screen' ? 'Pi screen' : 'This phone', body: range({ id: 'volume', label: 'Volume', shown: percent(v), value: v, min: 0, max: 100, step: 5, low: 'Muted', high: '100%', arg: output, live: true }) });
   },
 
   speed(S, output) {
     const v = S.sessions[output].speed;
-    return sheet({ title: 'Speed', sub: output === 'Pi screen' ? 'Pi screen' : 'This phone', body: slider('speed', 'Speed', v, 0.5, 2, 0.25, v + '×', '0.5×', '2×', output) });
+    return sheet({ title: 'Speed', sub: output === 'Pi screen' ? 'Pi screen' : 'This phone', body: range({ id: 'speed', label: 'Speed', shown: v + '×', value: v, min: 0.5, max: 2, step: 0.25, low: '0.5×', high: '2×', arg: output, live: true }) });
   },
 
   skip(S, output) {
@@ -176,20 +197,50 @@ const SHEETS = {
 
   'start-volume'(S) {
     const v = S.defaults.startVolume;
-    return sheet({ title: 'Starting volume', sub: 'On the Pi screen', body: slider('startVolume', 'Starting volume', v, 0, 100, 5, v === 0 ? 'Muted' : v + '%', 'Muted', '100%') });
+    return sheet({ title: 'Starting volume', sub: 'On the Pi screen', body: range({ id: 'startVolume', label: 'Starting volume', shown: percent(v), value: v, min: 0, max: 100, step: 5, low: 'Muted', high: '100%', live: true }) });
   },
 
   youtube(S) {
-    return sheet({ title: 'A YouTube link', sub: 'Plays on the Pi screen',
-      body: field({ id: 'ytLink', hint: 'Paste the link', value: S.ytLink, icon: 'link' }) + `<p class="note-line">${icon('open', 14)}From the YouTube app, use Share and choose csync.</p>`,
-      acts: btn('Play on Pi screen', 'screen', 'play-link', '', 'primary', S.ytLink.trim() ? '' : 'disabled') });
+    return sheet({ title: 'A link', sub: 'Plays on the Pi screen',
+      body: field({ id: 'ytLink', hint: 'Paste a YouTube link', value: S.ytLink, icon: 'link' }) + noteLine('open', 'From YouTube or Instagram, use Share and choose Send to Pi screen.'),
+      acts: btn('Play on Pi screen', 'screen', 'play-link', '', 'tonal', S.ytLink.trim() ? '' : 'disabled') });
+  },
+
+  cast(S, what) {
+    if (what === 'app') {
+      return sheet({ title: 'Show one app', sub: 'On the Pi screen', body: appTiles(PHONE_APPS, 'cast-app') +
+        noteLine('eye', 'Only that app is shown. Notifications and the rest of this phone stay private.') });
+    }
+    return sheet({ title: "Show this phone's screen", sub: 'On the Pi screen',
+      body: notice('info', 'Everything on this phone is shown, notifications too. Android asks before it starts.') +
+        facts([['Picture', 'Up to 1080p'], ['Sound', 'Stays on this phone'], ['Needs', 'The same network as the Pi']]),
+      acts: btn('Not now', 'back', 'close-sheet') + btn('Start', 'screen', 'cast-screen', '', 'tonal') });
+  },
+
+  slideshow(S) {
+    const folders = Object.entries(LIBRARY).map(([name, items]) => [name || 'Top level', items.filter(i => i.kind === 'image').length]).filter(([, n]) => n);
+    return sheet({ title: 'Photos as a slideshow', sub: `From ${S.source}`, body: group(folders.map(([name, n]) =>
+      row({ icon: 'folder', title: name, sub: plural(n, 'image'), act: 'play', arg: `Pi screen|Photos in ${name}|0|1|Slideshow` })).join('')) });
+  },
+
+  'show-note'(S) {
+    return sheet({ title: 'Show a note', sub: 'On the Pi screen', body: group(S.notes.map(n => row({ icon: 'note', title: n.title, sub: n.edited, act: 'play', arg: `Pi screen|${n.title}|0|1|Shown` })).join('')) });
   },
 
   'chat-add'(S) {
     return sheet({ title: 'Add to this message', body: group(
       row({ icon: 'photo', title: 'An image', sub: 'The assistant can look at it', act: 'attach-chat-file', arg: 'Image|IMG 4410.jpg' }) +
       row({ icon: 'file', title: 'A file', sub: 'Kept on the Pi', act: 'attach-chat-file', arg: 'File|quote.pdf' }) +
-      row({ icon: 'think-2', title: 'Model', value: `${S.model} ${S.effort.toLowerCase()}`, act: 'sheet', arg: 'model|chat', opens: true })) });
+      row({ icon: 'camera', title: 'A photo from the Pi camera', sub: piUp(S) ? 'Taken now' : 'The Pi is offline', off: !piUp(S), act: 'attach-chat-file', arg: 'Image|Pi camera photo' }) +
+      row({ icon: 'clipboard', title: 'The clipboard', sub: S.clip.sub, act: 'attach-chat-file', arg: `${S.clip.kind}|Clipboard ${S.clip.kind.toLowerCase()}` })) });
+  },
+
+  'export-chat'(S) {
+    const image = S.exportFormat === 'Image';
+    return sheet({ title: 'Save this conversation', sub: exportName(S), body:
+      labelled('Save as', seg([['Markdown', 'markdown'], ['Image', 'image']], S.exportFormat, 'export-format', 'Save as'),
+        image ? 'One tall picture of the whole conversation, as it looks here.' : 'Text you can edit. What the assistant found is listed under each reply.') +
+      actionGroups(S, { kind: image ? 'image' : 'doc', title: exportName(S), is: 'export' }) });
   },
 
   model(S, scope) {
@@ -206,7 +257,7 @@ const SHEETS = {
   fork(S, index) {
     const t = thread(S), upTo = t.messages.slice(0, Number(index) + 1).filter(m => !m.thinking);
     return sheet({ title: 'Fork from here', sub: `${plural(upTo.length, 'message')} carry over`,
-      body: `<div class="msgs">${upTo.map(m => `<div class="msg${m.me ? ' me' : ''}">${markdown(m.text)}</div>`).join('')}</div>` +
+      body: msgs(upTo.map((m, i) => bubble(m, i, false, false)).join('')) +
         group(row({ icon: 'think-2', title: 'Model', value: `${S.model} ${S.effort.toLowerCase()}`, act: 'sheet', arg: 'model|chat', opens: true })),
       acts: btn('Create the fork', 'fork', 'fork', index, 'primary') });
   },
@@ -214,20 +265,19 @@ const SHEETS = {
   result(S, arg) {
     const [i, j] = arg.split('|').map(Number), m = thread(S).messages[i], r = m.results[j];
     if (r.kind === 'media') return actionSheet(S, { kind: 'video', title: r.title }, `The assistant started it at ${m.when}`);
-    const body = r.kind === 'image' ? `<div class="picture live">${icon('photo', 36)}</div>` + facts([['Size', '1920 by 1080'], ['Taken', `Today, ${m.when}`]])
-      : r.kind === 'file' ? `<div class="card">${markdown('Pi USB has 6 videos. Elements has 418 items and was last connected on Monday.')}</div>` + facts([['Kind', 'Text'], ['Size', '4 kB']])
-      : facts([['Read at', m.when], ['Output', 'Pi screen'], ['State', 'Playing'], ['Volume', 'Muted'], ['Position', '0:04']]);
-    return sheet({ title: r.title, sub: 'From the assistant', body,
-      acts: btn('Copy', 'copy', 'toast', 'Copied') + (r.kind === 'facts' ? '' : btn('Save on this phone', 'download', 'toast', 'Saved', 'primary')) });
+    if (r.kind === 'image') return actionSheet(S, { kind: 'image', title: r.title }, `From the assistant, ${m.when}`, picture({ icon: 'photo', mode: 'live' }));
+    if (r.kind === 'file') return actionSheet(S, { kind: 'doc', title: r.title }, r.sub, card(markdown('Pi USB has 6 videos. Elements has 418 items and was last connected on Monday.')));
+    if (r.kind === 'note') return sheet({ title: r.title, sub: r.sub, body: card(markdown(NOTES[1].body)) + group(row({ icon: 'note', title: 'Open in Notes', act: 'open-note', arg: 'n2', opens: true })) });
+    return sheet({ title: r.title, sub: `From the assistant, ${m.when}`, body: facts(r.facts), acts: btn('Copy', 'copy', 'toast', 'Copied') });
   },
 
   tools() {
-    return sheet({ title: 'What the assistant can use', body: ASSISTANT_TOOLS.map(g => section(g.group, `<div class="group defs">${g.tools.map(([name, does]) => `<p><b>${esc(name)}</b><span>: ${esc(does)}</span></p>`).join('')}</div>`)).join('') });
+    return sheet({ title: 'What the assistant can use', body: ASSISTANT_TOOLS.map(g => section(g.group, defs(g.tools))).join('') });
   },
 
   capture(S, id) {
     const c = S.captures.flatMap(d => d.items.map(i => ({ ...i, day: d.day }))).find(i => i.id === id), title = c.kind === 'Photo' ? 'Photo' : `Recording, ${c.length}`;
-    return actionSheet(S, { kind: c.kind === 'Photo' ? 'image' : 'video', title, remove: `delete-capture|${id}` }, `${c.day}, ${c.when} · ${c.size}`, `<div class="picture live">${icon(c.kind === 'Photo' ? 'photo' : 'video', 36)}</div>`);
+    return actionSheet(S, { kind: c.kind === 'Photo' ? 'image' : 'video', title, remove: `delete-capture|${id}` }, `${c.day}, ${c.when} · ${c.size}`, picture({ icon: c.kind === 'Photo' ? 'photo' : 'video', mode: 'live' }));
   },
 
   'delete-capture'(S, id) {
@@ -236,6 +286,27 @@ const SHEETS = {
 
   'share-note'(S) { return actionSheet(S, { kind: 'text', is: 'note', title: S.notes.find(n => n.id === S.noteId).title }, 'Note'); },
   'share-pin'(S) { const p = S.pins.find(x => x.id === S.pinId); return actionSheet(S, { kind: p.link ? 'link' : 'text', is: 'pin', title: p.title }, 'Pin'); },
+
+  'note-item'(S, index) {
+    const it = S.notes.find(n => n.id === S.noteId).items[index];
+    return actionSheet(S, { kind: it.kind, title: it.title, is: 'note', remove: `drop-note-item|${index}`, removeWords: 'Take out of this note' }, `${KIND_WORDS[it.kind]}, in this note`);
+  },
+
+  'drop-note-item'(S, index) {
+    const it = S.notes.find(n => n.id === S.noteId).items[index];
+    return sheet({ title: 'Take it out of this note?', sub: `${it.title} stays where it came from.`, body: '', acts: btn('Keep it', 'back', 'close-sheet') + btn('Take out', 'trash', 'drop-note-item', index, 'danger') });
+  },
+
+  'note-add'(S) {
+    const add = (symbol, title, sub, arg, off = false) => row({ icon: symbol, title, sub, off, act: 'note-add', arg });
+    return sheet({ title: 'Add to this note', body: group(
+      add('photo', 'An image', 'From this phone', 'image|IMG 4410.jpg') +
+      add('video', 'A video', 'From this phone', 'video|VID 2026-09-26.mp4') +
+      add('file', 'A file', 'Any document', 'doc|quote.pdf') +
+      add('media', 'Something from Media', 'A file on the Pi drives', 'video|Adjustable bend', !piUp(S)) +
+      add('camera', 'A photo from the Pi camera', piUp(S) ? 'Taken now' : 'The Pi is offline', 'image|Pi camera photo', !piUp(S)) +
+      add('clipboard', 'The clipboard', S.clip.sub, `${kindOf(S.clip.kind)}|Clipboard ${S.clip.kind.toLowerCase()}`)) });
+  },
 
   'delete-note'(S) {
     return sheet({ title: 'Delete this note?', sub: S.notes.find(n => n.id === S.noteId).title, body: '', acts: btn('Keep it', 'back', 'close-sheet') + btn('Delete', 'trash', 'delete-note', '', 'danger') });
@@ -246,12 +317,11 @@ const SHEETS = {
 
   custom(S) {
     const c = S.customDraft || S.custom || '#8B5CF6', r = whiteOn(c);
-    return sheet({ title: 'Your own colour', body:
-      `<div class="swatch-big" style="background:${c}">${icon('check', 22)}<span>Sample</span></div>` +
-      labelled('Hue', `<input class="range hue" type="range" min="0" max="359" value="${hueOf(c)}" data-in="hue" aria-label="Hue">`) +
+    return sheet({ title: 'Your own colour', body: swatchBig(c) +
+      range({ id: 'hue', label: 'Hue', shown: 'Hue', value: hueOf(c), min: 0, max: 359, hue: true }) +
       labelled('Colour code', field({ id: 'hex', hint: '#8B5CF6', value: c, icon: 'palette' })) +
       status(r >= 4.5 ? 'good' : 'warn', r >= 4.5 ? `White text reads well on it, ${r.toFixed(1)} to 1` : `White text is hard to read on it, ${r.toFixed(1)} to 1`),
-      acts: btn('Use this colour', 'check', 'use-custom', '', 'primary') });
+      acts: btn('Use this colour', 'check', 'use-custom', '', 'tonal') });
   },
 
   power(S) {
@@ -259,7 +329,7 @@ const SHEETS = {
     return sheet({ title: 'Power', sub: !piUp(S) ? 'Offline' : low ? 'Low power' : 'Ready',
       body: (low ? notice('warn', 'The Pi is getting less power than it needs. Use the official power supply, or a powered hub for the drives.') : '') +
         facts([['Now', low ? 'Below 4.63 V' : '5.1 V'], ['Since it started', low ? 'Low 14 times' : 'Never low'], ['Slowed by heat', 'No'], low && ['Affects', 'Pi screen playback, drives']]),
-      acts: btn('Check again', 'refresh', 'recheck', '', 'primary') });
+      acts: btn('Check again', 'refresh', 'recheck', '') });
   },
 
   service(S, id) {
@@ -275,9 +345,10 @@ const SHEETS = {
   },
 
   widget(S, name) {
-    const w = WIDGETS.find(x => x.name === name), added = S.widgets.includes(name);
-    return sheet({ title: w.name, sub: w.kind, body: `<div class="picture">${icon(w.icon, 36)}</div>` + facts([['Shows', w.shows], ['Updates', w.updates]]),
-      acts: added ? btn('Remove', 'trash', 'widget-toggle', name, 'danger') : btn('Add', 'plus', 'widget-toggle', name, 'primary') });
+    const w = WIDGETS.find(x => x.name === name), added = S.widgets.includes(name), placed = ['Launcher widget', 'Quick Settings tile'].includes(w.kind);
+    const where = placed ? 'Updates' : 'Where';
+    return sheet({ title: w.name, sub: w.kind, body: picture({ icon: w.icon }) + facts([['Does', w.shows], [where, w.updates]]),
+      acts: !placed ? '' : added ? btn('Remove', 'trash', 'widget-toggle', name, 'danger') : btn('Add', 'plus', 'widget-toggle', name, 'tonal') });
   },
 
   app(S, name) {

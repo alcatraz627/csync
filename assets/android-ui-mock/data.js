@@ -81,16 +81,24 @@ const THREADS = [
       { thinking: true },
       { me: false, text: 'Found it on Elements and started it on the Pi screen, muted.', when: '18:41',
         results: [
-          { kind: 'media', title: 'A Matter of Life and Death', sub: 'Started on Pi screen' },
-          { kind: 'facts', title: 'Playback status', sub: 'Read at 18:41' }
+          { kind: 'media', tool: 'Play media', title: 'A Matter of Life and Death', output: 'Pi screen' },
+          { kind: 'facts', tool: 'Playback status', title: 'Playback status', facts: [['Output', 'Pi screen'], ['Volume', 'Muted'], ['Position', '0:04']] }
         ] },
-      { me: true, text: 'What volume is it at?', when: '18:42' },
-      { me: false, text: 'Volume is 0. The Pi screen starts muted, so raise it from the player when you are ready.', when: '18:42' }
+      { me: true, text: 'Raise the volume a little.', when: '18:42' },
+      { me: false, text: 'Done. It was muted, and it is at 35% now.', when: '18:42',
+        results: [{ kind: 'control', tool: 'Control playback', title: 'Volume on Pi screen', facts: [['Volume', '35%'], ['Before', 'Muted']] }] }
     ] },
-  { id: 't2', title: 'Find a clip on Elements', when: 'Yesterday', count: 8, favorite: false, archived: false, messages: [
+  { id: 't2', title: 'Find a clip on Elements', when: 'Yesterday', count: 4, favorite: false, archived: false, messages: [
       { me: true, text: 'Which knot tutorials are shorter than five minutes?', when: '09:12' },
       { me: false, text: 'One so far:\n\n- Adjustable bend, 4 minutes\n\nBamboo pole lashing runs 6 minutes.', when: '09:12',
-        results: [{ kind: 'image', title: 'Camera still', sub: 'Image from the Pi camera' }, { kind: 'file', title: 'Drive report', sub: 'Text file, 4 kB' }] }
+        results: [{ kind: 'file', tool: 'Share a Pi file', title: 'Drive report', sub: 'Text file, 4 kB' }] },
+      { me: true, text: 'Is anyone at the door? And which of my devices are on?', when: '09:14', files: [{ kind: 'Image', title: 'IMG 4410.jpg' }] },
+      { me: false, text: 'Nobody is at the door. Two of your devices are online.', when: '09:14',
+        results: [
+          { kind: 'image', tool: 'Camera', title: 'Camera still', sub: 'Image from the Pi camera' },
+          { kind: 'devices', tool: 'Your devices', title: 'Your devices', devices: [['studio-mac', true], ['galaxy-tab', true], ['work-macbook', false]] },
+          { kind: 'note', tool: 'Notes', title: 'Pi display ideas', sub: 'Note, edited on Monday' }
+        ] }
     ] },
   { id: 't3', title: 'Camera troubleshooting', when: 'Tuesday', count: 6, favorite: false, archived: true, messages: [
       { me: true, text: 'The camera preview is dark.', when: '21:03' },
@@ -126,8 +134,9 @@ const MODELS = [
 
 const NOTES = [
   { id: 'n1', title: 'Things to try on the phone', edited: 'Edited today',
+    items: [{ kind: 'image', title: 'Desk at sunset' }, { kind: 'video', title: 'Walk in the hills' }, { kind: 'doc', title: 'Projector manual' }],
     body: '# Things to try\n\nOpen **More**, then **Tools**, and update the app from the Pi.\n\n| Area | Try |\n| --- | --- |\n| Media | Resume a film on the Pi screen |\n| Share | Send a photo to studio-mac |\n\n```mermaid\ngraph LR\nPhone --> Pi\nPi --> Screen\n```' },
-  { id: 'n2', title: 'Pi display ideas', edited: 'Edited on Monday',
+  { id: 'n2', title: 'Pi display ideas', edited: 'Edited on Monday', items: [],
     body: '# Pi display ideas\n\nKeep the screen useful when nothing is playing.\n\n- A cover image per season\n- The camera when someone is at the door' }
 ];
 
@@ -151,9 +160,23 @@ const COVER_ART = ['linear-gradient(160deg,#6b4a2f,#a8683a 45%,#2f3d52)', 'linea
 const WIDGETS = [
   { name: 'xkcd', kind: 'Launcher widget', icon: 'image', shows: 'The latest comic', updates: 'Three times a week' },
   { name: 'Media remote', kind: 'Launcher widget', icon: 'play', shows: 'What the Pi screen is playing, with Pause and Stop', updates: 'While something plays' },
+  { name: 'Pi status', kind: 'Launcher widget', icon: 'pi', shows: 'Whether the Pi is online, its power and its drives', updates: 'Every 15 minutes' },
+  { name: 'Camera glance', kind: 'Launcher widget', icon: 'camera', shows: 'The latest still from the Pi camera', updates: 'Every 15 minutes, or when tapped' },
   { name: 'Pi camera', kind: 'Quick Settings tile', icon: 'camera', shows: 'Opens the live picture', updates: 'When tapped' },
-  { name: 'Send the clipboard', kind: 'Quick Settings tile', icon: 'clipboard', shows: 'Sends the clipboard to your last device', updates: 'When tapped' }
+  { name: 'Send the clipboard', kind: 'Quick Settings tile', icon: 'clipboard', shows: 'Sends the clipboard to your last device', updates: 'When tapped' },
+  { name: 'Pi screen', kind: 'Quick Settings tile', icon: 'screen', shows: 'Stops what is playing, or shows the cover', updates: 'When tapped' },
+  { name: 'Send the last photo', kind: 'Quick Settings tile', icon: 'photo', shows: 'Sends your newest photo to your last device', updates: 'When tapped' },
+  { name: 'New chat', kind: 'App shortcut', icon: 'chat', shows: 'Opens a new conversation with the Pi assistant', updates: 'Press and hold the csync icon' },
+  { name: 'Send to a device', kind: 'App shortcut', icon: 'devices', shows: 'Opens Share with your last device chosen', updates: 'Press and hold the csync icon' },
+  { name: 'Pi camera, live', kind: 'App shortcut', icon: 'camera', shows: 'Opens the live picture', updates: 'Press and hold the csync icon' },
+  { name: 'csync', kind: 'Share menu entry', icon: 'share', shows: 'Asks where the item goes: the Pi screen, a device, a conversation, a note or a pin', updates: 'In the share menu of any app' },
+  { name: 'Send to Pi screen', kind: 'Share menu entry', icon: 'screen', shows: 'Puts the item on the Pi screen at once, with no question', updates: 'In the share menu of any app' },
+  { name: 'Send to your last device', kind: 'Share menu entry', icon: 'devices', shows: 'Sends the item to the device you sent to last', updates: 'In the share menu of any app' }
 ];
+
+// What Android offers when csync hands an item to another app, and the apps whose window can be shown on the Pi screen.
+const SHARE_APPS = [['Messages', 'chat'], ['Gmail', 'send'], ['Drive', 'files'], ['Photos', 'photo'], ['Nearby', 'wifi'], ['Copy', 'copy']];
+const PHONE_APPS = [['Photos', 'photo'], ['Chrome', 'link'], ['Maps', 'source'], ['Files', 'files'], ['YouTube', 'video'], ['Camera', 'camera']];
 
 const BUSY_APPS = [
   { name: 'Chrome', memory: '612 MB', cpu: '9%', trend: 'Memory rising' },

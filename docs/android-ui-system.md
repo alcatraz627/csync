@@ -106,7 +106,7 @@ layer uses the same names.
 | `row` | icon, title, second line, status or value, what it does | Chevron only when it opens something. A trailing icon button is a direct action named by its icon. |
 | `tile` | icon, title, status or a number | The same data as a row, for grids. |
 | `seg` | options with an icon each, the chosen one | No two options in one control share an icon. Scrolls sideways when it must, with a fade on the right. |
-| `btn` | label, icon, kind | Kinds: primary, plain, quiet, danger. One primary on a page. A disabled primary turns neutral. |
+| `btn` | label, icon, kind | Kinds: primary (filled), tonal (tinted), plain, quiet, danger. Filled is only for Send, Save, Install and Create, one to a page or sheet. Tonal confirms a choice in a sheet. An action for the whole page is an icon in the top bar. A disabled primary turns neutral. |
 | `ibtn` | icon, spoken name | Always has a spoken name. |
 | `field` | icon, hint, value | Hints never end in an ellipsis. |
 | `status` | tone, words | Dot then words. Tones: good, warn, bad, idle. |
@@ -115,7 +115,19 @@ layer uses the same names.
 | `sheet` | title, content, buttons | Handle, no close button. Buttons only when it changes something. |
 | `itemActions` | the kind of item | The one list of what an item can do. No screen writes its own. |
 | `facts` | pairs | Label on the left, value on the right. |
-| `playerControls` | the output | The same controls at page and panel size. |
+| `player` | the session, the output | The same controls at page and panel size. A live source (a camera, a shared screen, a slideshow) shows Stop and its settings only. |
+| `picture`, `framedPicture`, `coverGrid` | icon, mode, corner tag | Where a picture or video goes. The tag says where it is shown. |
+| `range` | label, value, ends | The value is written above the slider and changes while dragging. |
+| `bubble` | the message | Yours right in a tint, the assistant left. The time is inside. Tapping shows Copy, Fork, and Regenerate or Edit as one tight strip. |
+| `resultCard` | what a tool returned | Drawn for its kind: media, control, image, file, facts, note, devices. A media card carries Pause and Stop while it plays. |
+| `composer` | the draft | One box for the text, attachments, the add button, the model and Send. Grows to six lines, opens taller on request. Send is filled only when there is something to send. |
+| `lead`, `card`, `noteLine`, `defs`, `chip`, `swatches`, `shoot`, `editor`, `appTiles` | | Small composites, each with one drawing. |
+
+The full list with a live example of each is the Design system view of the
+mock, and the same list is a place in the app under More, Help and about.
+`runChecks()` reads `screens.js` and `sheets.js` as text and fails any line
+with a tag, a class or a style of its own, so a screen can only be built from
+these parts.
 
 ## What may never appear
 

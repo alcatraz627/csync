@@ -16,7 +16,7 @@ function freshState() {
     clip: { kind: 'Text', sub: 'Text, 46 characters', body: 'HDMI 2 is the Pi. HDMI 1 is the laptop dock.' }, widgets: ['xkcd'], customDraft: '',
     incomingOptions: { loop: 'Off', speed: 1, volume: 0 }, ytLink: '',
     chatSearch: false, chatQuery: '', threads: clone(THREADS), threadId: 't1', pickedMsg: null, editingTitle: false,
-    draft: '', draftOpen: false, draftHeight: 200, chatAttachment: null,
+    draft: '', draftOpen: false, draftHeight: 200, chatAttachment: null, exportFormat: 'Markdown', tabs: 'a',
     provider: 'Gemini', model: 'gemini-3.8-flash', effort: 'Medium', defaultModel: 'gemini-3.8-flash', defaultEffort: 'Medium', modelDraft: null,
     notes: clone(NOTES), pins: clone(PINS), noteId: 'n1', pinId: 'p1', notesSearch: false, noteQuery: '',
     captures: clone(CAPTURES), recording: false,
@@ -29,24 +29,26 @@ let S = freshState();
 const timers = {};
 const OUTPUT_PAGE = { 'Pi screen': 'pi-screen', 'This phone': 'phone-player' };
 const PAGE_OUTPUT = { 'pi-screen': 'Pi screen', 'phone-player': 'This phone' };
+// Sources with no position to seek in: a camera, a shared screen, a slideshow, something held on the screen.
+const LIVE_SOURCES = ['Pi camera', 'This phone', 'Slideshow', 'Shown'];
 const resolvedTheme = state => state.theme === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : state.theme;
 
 // the phone
 
 function miniRow(s) {
-  return `<div class="mini"><span class="bar-line"><i style="width:${Math.round(s.at / s.total * 100)}%"></i></span><button type="button" class="mini-open" ${on('panel', s.output)} aria-label="Open the player for ${esc(s.output)}">${status(sessionTone(s), `${sessionWords(s)} on ${s.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></button>${ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', s.output, '', 19)}${ibtn('stop', 'Stop', 'p-stop', s.output, '', 18)}${ibtn('volume', 'Volume', 'sheet', `volume|${s.output}`, 'quiet', 18)}${ibtn('speed', 'Speed', 'sheet', `speed|${s.output}`, 'quiet', 18)}</div>`;
+  return `<div class="mini"><span class="bar-line"><i style="width:${Math.round(s.at / s.total * 100)}%"></i></span><button type="button" class="mini-open" ${on('panel', s.output)} aria-label="Open the player for ${esc(s.output)}">${status(sessionTone(s), `${sessionWords(s)} on ${s.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></button>${s.live ? '' : ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', s.output, '', 19)}${ibtn('stop', 'Stop', 'p-stop', s.output, '', 18)}${ibtn('volume', 'Volume', 'sheet', `volume|${s.output}`, 'quiet', 18)}${s.live ? '' : ibtn('speed', 'Speed', 'sheet', `speed|${s.output}`, 'quiet', 18)}</div>`;
 }
 
 function panelHtml(state) {
   const s = state.panel && state.sessions[state.panel];
   if (!s) return '';
-  return `<div class="panel" role="region" aria-label="Player"><div class="handle" data-drag="panel"><span></span></div><div class="panel-title"><div>${status(sessionTone(s), `${sessionWords(s)} on ${state.panel === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></div>${ibtn('up', 'Open the full player', 'go', OUTPUT_PAGE[state.panel], 'quiet', 18)}</div>${playerControls(state, state.panel, true)}</div>`;
+  return `<div class="panel" role="region" aria-label="Player"><div class="handle" data-drag="panel"><span></span></div><div class="panel-title"><div>${status(sessionTone(s), `${sessionWords(s)} on ${state.panel === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}<b>${clamp(s.title, true)}</b></div>${ibtn('up', 'Open the full player', 'go', OUTPUT_PAGE[state.panel], 'quiet', 18)}</div>${player(s, state.panel, true)}</div>`;
 }
 
 function shadeHtml(state) {
   if (!state.shade) return '';
   const list = active(state);
-  return `<div class="shade" ${on('shade')}><div class="shade-card" data-hold>${list.length ? list.map(s => `<div class="panel-title">${icon('media', 20)}<div><b>${clamp(s.title, true)}</b>${status(sessionTone(s), `${sessionWords(s)} on ${s.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}</div>${ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', s.output, '', 19)}${ibtn('stop', 'Stop', 'p-stop', s.output, '', 18)}</div>`).join('') : empty('media', 'Nothing is playing', '')}</div></div>`;
+  return `<div class="shade" ${on('shade')}><div class="shade-card" data-hold>${list.length ? list.map(s => `<div class="panel-title">${icon('media', 20)}<div><b>${clamp(s.title, true)}</b>${status(sessionTone(s), `${sessionWords(s)} on ${s.output === 'Pi screen' ? 'Pi screen' : 'this phone'}`)}</div>${s.live ? '' : ibtn(s.paused ? 'play' : 'pause', s.paused ? 'Resume' : 'Pause', 'p-pause', s.output, '', 19)}${ibtn('stop', 'Stop', 'p-stop', s.output, '', 18)}</div>`).join('') : empty('media', 'Nothing is playing', '')}</div></div>`;
 }
 
 function fullHtml(state) {
@@ -76,6 +78,7 @@ function dress(el, state) {
   el.style.setProperty('--p-accent-fill', fill);
   el.style.setProperty('--p-accent', text);
   el.style.setProperty('--ts', { sm: 1, md: 1.15, lg: 1.3 }[state.size]);
+  el.dataset.tabs = state.tabs;
   el.classList.toggle('narrow', state.size === 'lg');
 }
 
@@ -95,9 +98,12 @@ function tidy(el) {
   const crumbs = el.querySelector('.crumbs');
   if (!crumbs) return;
   for (const step of crumbs.querySelectorAll('.crumb:not(.now)')) {
-    if (crumbs.scrollWidth <= crumbs.clientWidth) break;
+    const here = crumbs.querySelector('.crumb.now span');
+    if (crumbs.scrollWidth <= crumbs.clientWidth && !(here && here.scrollWidth > here.clientWidth)) break;
     step.classList.add('icon-only');
   }
+  const name = crumbs.querySelector('.crumb.now .clamp');
+  if (name) name.classList.toggle('cut', name.scrollWidth > name.clientWidth + 1);
 }
 
 const phone = document.querySelector('#phone');
@@ -157,8 +163,9 @@ function clearPending(output) {
 function start(output, title, at = 0, total = 0, source = '') {
   clearPending(output);
   const found = findItem(title), known = HISTORY.find(h => h.title === title);
-  S.sessions[output] = { title, source: source || known?.source || S.source, at: Number(at) || 0, total: Number(total) || known?.total || (found.kind === 'image' ? 1 : 2580),
-    paused: false, busy: true, error: '', volume: output === 'Pi screen' ? S.defaults.startVolume : 35, speed: 1, rotate: 0, loop: S.defaults.loop, favorite: false, skip: S.defaults.skip, pending: {} };
+  const live = LIVE_SOURCES.includes(source) || ['image', 'doc'].includes(found.kind);
+  S.sessions[output] = { title, source: source || known?.source || S.source, at: Number(at) || 0, total: Number(total) || known?.total || (live ? 1 : 2580),
+    live, paused: false, busy: true, error: '', volume: output === 'Pi screen' ? S.defaults.startVolume : 35, speed: 1, rotate: 0, loop: S.defaults.loop, favorite: false, skip: S.defaults.skip, pending: {} };
   if (S.place === 'incoming') Object.assign(S.sessions[output], { loop: S.incomingOptions.loop, speed: S.incomingOptions.speed, volume: S.incomingOptions.volume });
   go(OUTPUT_PAGE[output]);
   timers[output + ':load'] = setTimeout(() => { if (S.sessions[output]) { S.sessions[output].busy = false; render(); } }, 700);
@@ -219,6 +226,8 @@ const ACTS = {
   resume: index => { const h = HISTORY[index]; play(`${h.output}|${h.title}|${h.at}|${h.total}|${h.source}`); },
   'play-link': () => { const link = S.ytLink.trim(); S.ytLink = ''; play(`Pi screen|${link.replace(/^https?:\/\//, '').slice(0, 40)}|0|600|YouTube`); },
   'show-camera': () => play('Pi screen|Pi camera, live|0|1|Pi camera'),
+  'cast-screen': () => { S.sheet = null; play("Pi screen|This phone's screen|0|1|This phone"); },
+  'cast-app': name => { S.sheet = null; play(`Pi screen|${name}, from this phone|0|1|This phone`); },
   move: from => { const s = S.sessions[from], to = from === 'Pi screen' ? 'This phone' : 'Pi screen'; clearPending(from); S.sessions[from] = null; start(to, s.title, s.at, s.total, s.source); },
   'p-pause': output => {
     const s = S.sessions[output];
@@ -271,14 +280,26 @@ const ACTS = {
   'fav-thread': () => { const t = thread(S); t.favorite = !t.favorite; toast(t.favorite ? 'Added to favorites' : 'Removed from favorites'); },
   'arch-thread': () => { const t = thread(S); t.archived = !t.archived; toast(t.archived ? 'Archived' : 'Back in the main list'); },
   'pick-msg': i => { S.pickedMsg = S.pickedMsg === Number(i) ? null : Number(i); render(); },
-  'draft-open': () => { S.draftOpen = true; render(); phone.querySelector('.draft textarea')?.focus(); },
+  'draft-size': () => { S.draftOpen = !S.draftOpen; render(); phone.querySelector('[data-in="draft"]')?.focus(); },
+  'edit-msg': i => { S.draft = thread(S).messages[i].text; S.pickedMsg = null; render(); phone.querySelector('[data-in="draft"]')?.focus(); },
+  regen: i => { const m = thread(S).messages[i]; m.text = 'Here is another sample reply. The mock is not connected to the Pi.'; m.when = 'Now'; S.pickedMsg = null; toast('Regenerated'); },
+  'export-format': v => { S.exportFormat = v; render(); },
+  'shared-out': name => { S.sheet = null; toast(name === 'Copy' ? 'Copied' : `Handed to ${name}`); },
+  'add-to-note': arg => {
+    const [id, kind, ...rest] = arg.split('|'), item = { kind, title: rest.join('|') };
+    if (id === 'new') S.notes.unshift({ id: 'n' + Date.now(), title: item.title, edited: 'Edited just now', body: '', items: [item] });
+    else S.notes.find(n => n.id === id).items.push(item);
+    S.sheet = null; toast(`Added to ${id === 'new' ? 'a new note' : S.notes.find(n => n.id === id).title}`);
+  },
+  'note-add': arg => { const [kind, ...rest] = arg.split('|'), n = S.notes.find(x => x.id === S.noteId); n.items.push({ kind, title: rest.join('|') }); n.edited = 'Edited just now'; S.sheet = null; toast('Added to this note'); },
+  'drop-note-item': index => { S.notes.find(n => n.id === S.noteId).items.splice(Number(index), 1); S.sheet = null; toast('Taken out of this note'); },
   'attach-chat-file': arg => { const [kind, title] = arg.split('|'); S.chatAttachment = { kind, title }; S.sheet = null; render(); },
   'attach-chat': arg => { const [id, kind, ...rest] = arg.split('|'); if (id === 'new') ACTS['new-thread'](); else { S.threadId = id; go('conversation'); } S.chatAttachment = { kind: { image: 'Image', video: 'Video', text: 'Text', link: 'Link' }[kind] || 'File', title: rest.join('|') }; render(); },
   'chat-detach': () => { S.chatAttachment = null; render(); },
   'send-chat': () => {
     const text = S.draft.trim(), t = thread(S);
     if (!text && !S.chatAttachment) return toast('Write a message or add something first');
-    t.messages.push({ me: true, text: [text, S.chatAttachment ? `Attached: ${S.chatAttachment.title}` : ''].filter(Boolean).join('\n\n'), when: 'Now' }, { me: false, text: 'This is a sample reply. The mock is not connected to the Pi.', when: 'Now' });
+    t.messages.push({ me: true, text, files: S.chatAttachment ? [S.chatAttachment] : [], when: 'Now' }, { me: false, text: 'This is a sample reply. The mock is not connected to the Pi.', when: 'Now' });
     t.count = t.messages.filter(m => !m.thinking).length; t.when = 'Now';
     Object.assign(S, { draft: '', draftOpen: false, chatAttachment: null });
     render(); const scroll = phone.querySelector('.p-scroll'); scroll.scrollTop = scroll.scrollHeight;
@@ -296,7 +317,7 @@ const ACTS = {
   'delete-capture': id => { for (const d of S.captures) d.items = d.items.filter(i => i.id !== id); S.sheet = null; toast('Deleted'); },
 
   'open-note': id => { S.noteId = id; S.view.note = 'Preview'; go('note'); },
-  'new-note': () => { const id = 'n' + Date.now(); S.notes.unshift({ id, title: 'Untitled note', edited: 'Edited just now', body: '' }); S.noteId = id; S.view.note = 'Plain'; go('note'); },
+  'new-note': () => { const id = 'n' + Date.now(); S.notes.unshift({ id, title: 'Untitled note', edited: 'Edited just now', body: '', items: [] }); S.noteId = id; S.view.note = 'Plain'; go('note'); },
   'save-note': () => { const n = S.notes.find(x => x.id === S.noteId), rich = phone.querySelector('[data-rich]'); if (rich) n.body = rich.innerText.trim(); n.edited = 'Edited just now'; toast('Note saved'); },
   'delete-note': () => { S.notes = S.notes.filter(n => n.id !== S.noteId); go('notes'); },
   'open-pin': id => { S.pinId = id; go('pin'); },
@@ -372,9 +393,10 @@ phone.addEventListener('input', event => {
     return;
   }
   if (key === 'draft') {
+    // The box grows by itself; a re-draw is needed only when Send or the taller-box button has to appear or go.
+    const before = [Boolean(S.draft.trim()), longDraft(S)].join();
     S.draft = value;
-    const grew = !S.draftOpen && (value.split('\n').length > 2 || el.scrollHeight > el.clientHeight + 18);
-    if (grew) { S.draftOpen = true; render(); const big = phone.querySelector('.draft textarea'); big.focus(); big.setSelectionRange(value.length, value.length); }
+    if (before !== [Boolean(S.draft.trim()), longDraft(S)].join()) renderTyping(key);
   }
 });
 
@@ -398,7 +420,7 @@ addEventListener('pointerup', event => {
   if (what === 'panel' && moved > 50) { S.panel = null; render(); }
   if (what === 'panel' && moved < -50) go(OUTPUT_PAGE[S.panel]);
   if (what === 'draft' && moved > 50) { S.draftOpen = false; render(); }
-  if (what === 'draft' && moved < -25) { S.draftHeight = Math.min(430, S.draftHeight - moved); render(); }
+  if (what === 'draft' && moved < -25) { S.draftHeight = Math.min(380, S.draftHeight - moved); render(); }
 });
 
 addEventListener('hashchange', () => { const id = location.hash.slice(1); if (PLACE[id] && id !== S.place) go(id); });

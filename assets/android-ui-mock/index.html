@@ -20,6 +20,13 @@
       <button type="button" data-size-set="md">Medium</button>
       <button type="button" data-size-set="lg">Large</button>
     </span>
+    <span class="shell-group" role="group" aria-label="Tab style">
+      <button type="button" data-tabs-set="a">Tabs A</button>
+      <button type="button" data-tabs-set="b">B</button>
+      <button type="button" data-tabs-set="c">C</button>
+      <button type="button" data-tabs-set="d">D</button>
+    </span>
+    <button type="button" class="shell-btn" id="system-toggle">Design system</button>
     <button type="button" class="shell-btn" id="wall-toggle">Show every screen</button>
     <button type="button" class="shell-btn" id="reset">Start over</button>
   </header>
@@ -39,6 +46,7 @@
     <aside class="inspect" id="inspect" aria-label="About this screen"></aside>
   </div>
   <div class="gallery" id="wall" hidden></div>
+  <div class="system" id="system" hidden></div>
 
   <script src="model.js"></script>
   <script src="icons.js"></script>
@@ -46,6 +54,7 @@
   <script src="kit.js"></script>
   <script src="screens.js"></script>
   <script src="sheets.js"></script>
+  <script src="system.js"></script>
   <script src="app.js"></script>
   <script src="review.js"></script>
   <script src="check.js"></script>
