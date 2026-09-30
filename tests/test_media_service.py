@@ -1006,6 +1006,27 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual((status, json.loads(data)["player"]["state"]), (200, "idle"))
             show.assert_called_once()
 
+    def test_a_listed_folder_says_how_many_things_opening_it_would_show(self):
+        (self.root / "folder" / "inner").mkdir()
+        (self.root / "folder" / "ignored.db").write_bytes(b"not media")
+        status, data, _ = self.request("GET", "/v1/items?driveId=disk1")
+        self.assertEqual(status, 200)
+        items = {item["name"]: item for item in json.loads(data)["items"]}
+        self.assertEqual(items["folder"]["count"], 2)
+        self.assertNotIn("count", items["Movie α.mp4"])
+        status, data, _ = self.request("GET", "/v1/items?driveId=disk1&path=folder")
+        self.assertEqual(len(json.loads(data)["items"]), items["folder"]["count"])
+
+    def test_saved_cover_can_be_read_back_and_is_missing_until_one_is_saved(self):
+        status, data, _ = self.request("GET", "/v1/display/wallpaper/image")
+        self.assertEqual((status, json.loads(data)["code"]), (404, "COVER_MISSING"))
+        image = b"\xff\xd8\xff" + b"cover" * 40
+        self.state.wallpaper.write_bytes(image)
+        status, data, headers = self.request("GET", "/v1/display/wallpaper/image")
+        self.assertEqual((status, data, headers["Content-Type"]), (200, image, "image/jpeg"))
+        status, _, _ = self.request("GET", "/v1/display/wallpaper/image", headers={"X-Csync-Token": "wrong"})
+        self.assertEqual(status, 401)
+
     def test_camera_blackholed_viewer_is_released(self):
         class BurstCamera:
             def __init__(self):

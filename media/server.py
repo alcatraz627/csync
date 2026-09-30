@@ -1299,6 +1299,20 @@ def handler_for(state: State, token: str):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def _wallpaper(self):
+            """Send the saved cover, so a phone can show what the idle screen shows."""
+            try:
+                data = state.wallpaper.read_bytes()
+            except OSError:
+                raise MediaError("COVER_MISSING", "No cover image is saved on the Pi", 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
         def _note_file(self, note_id: str, file_id: str):
             return self._send_file(*state.note_file_open(note_id, file_id))
 
@@ -1434,6 +1448,8 @@ def handler_for(state: State, token: str):
                     return self._json(200, diagnostics())
                 if path == "/v1/display/wallpaper":
                     return self._json(200, {"stored": state.wallpaper.is_file()})
+                if path == "/v1/display/wallpaper/image":
+                    return self._wallpaper()
                 if path == "/v1/displays":
                     return self._json(200, state.displays_list())
                 if path == "/v1/app/apk":

@@ -254,7 +254,17 @@ class Library:
             entries = [p for p in folder.iterdir() if not p.is_symlink() and
                        (p.is_dir() or (p.is_file() and _media_file(p)))]
             entries.sort(key=lambda p: (not p.is_dir(), p.name.casefold(), p.name))
-            page = [self.describe(drive, p) for p in entries[offset:offset + limit]]
+            page = []
+            for entry in entries[offset:offset + limit]:
+                item = self.describe(drive, entry)
+                if item["directory"]:
+                    # How many things opening the folder would list; left out when it cannot be read.
+                    try:
+                        item["count"] = sum(1 for p in entry.iterdir() if not p.is_symlink() and
+                                            (p.is_dir() or (p.is_file() and _media_file(p))))
+                    except OSError:
+                        pass
+                page.append(item)
         except PermissionError:
             raise MediaError("MOUNT_UNREADABLE", "This folder cannot be read", 403)
         return {"items": page, "nextOffset": offset + limit if offset + limit < len(entries) else None,
