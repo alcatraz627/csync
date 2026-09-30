@@ -40,7 +40,7 @@ csync (MainActivity holds Home, Share, Chat, Tools, Settings, Camera, More;
 │   │   sheets: slideshow (folder, seconds) · note (pick) · link (field) · Cover image (Fit, Rotate, Choose) · Display (name, rotate, starting volume, sound) · skip length
 │   │   └─ Full screen video               a mode of the player, Back returns to the player
 │   └─ This phone                         child; the phone output
-│       states: idle (Browse Media) · loading · playing · paused · finished · failed
+│       states: idle (says how to fill it) · loading · playing · paused · finished · failed
 │       also: PhonePlaybackService notification (pause, stop) survives the page
 │
 ├─ Share                                  bar place 3

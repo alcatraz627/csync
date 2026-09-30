@@ -171,7 +171,7 @@ const SCREENS = {
     actions: S => S.sessions['This phone'] ? ibtn('expand', 'Full screen', 'full', 'on') + ibtn('screen', 'Move to the Pi screen', 'sheet', 'move|This phone') : '',
     body(S) {
       const s = S.sessions['This phone'];
-      if (!s) return empty('device', 'Nothing is playing on this phone', '', btn('Browse Media', 'media', 'go', 'media'));
+      if (!s) return empty('device', 'Nothing is playing on this phone', 'Choose something in Media and pick Play on this phone. The last thing played is under Pick up on Home.', '');
       return head(s.title, status(sessionTone(s), `${sessionWords(s)} on this phone`)) +
         picture({ icon: 'video', size: 40, mode: 'live', loading: s.busy, tag: ['device', 'On this phone'] }) +
         (s.error ? notice('bad', s.error, btn('Try again', 'refresh', 'p-pause', 'This phone')) : '') +
