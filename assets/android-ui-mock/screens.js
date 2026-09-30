@@ -154,7 +154,6 @@ const SCREENS = {
       return head('Nothing is playing', status('idle', 'Showing the cover')) +
         picture({ icon: 'image', mode: 'idle', tag: ['image', S.cover] }) +
         section('From the Pi', group(
-          row({ icon: 'media', title: 'Browse Media', sub: 'Films, shows, photos', act: 'go', arg: 'media', opens: true }) +
           row({ icon: 'photo', title: 'Photos as a slideshow', sub: 'Every image in a folder, in turn', act: 'sheet', arg: 'slideshow', opens: true }) +
           row({ icon: 'camera', title: 'The Pi camera', sub: 'Live picture', act: 'show-camera', arg: '' }))) +
         section('From this phone', group(

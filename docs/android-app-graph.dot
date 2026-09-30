@@ -63,7 +63,7 @@ digraph csync {
     X_Item -> X_Pi [label="Play / Show on Pi"]; X_Item -> X_Phone [label="Play here"]; X_Item -> X_From [label="Send to a device"];
     X_Item -> X_Conv [label="Send to a conversation"]; X_Item -> X_Note [label="Add to a note"]; X_Item -> X_Pin [label="Save as a pin"];
     X_From -> X_Pi [label="Play / Show"]; X_From -> X_Conv; X_From -> X_Note; X_From -> X_Pin;
-    X_Pi -> X_From [label="A file from this phone"]; X_Pi -> X_Media [label="Browse Media"];
+    X_Pi -> X_From [label="A file from this phone"];
     Outside [label="OUTSIDE: shortcuts · widgets · tiles · share menu · notifications", shape=note, fillcolor="#ebebeb"];
     Outside -> X_Conv [style=dotted, label="New chat · Ask the Pi · reply"]; Outside -> X_Share [style=dotted, label="Send"];
     Outside -> X_Camera [style=dotted, label="Camera · glance · tile"]; Outside -> X_Pi [style=dotted, label="Media remote · Send to Pi screen"];

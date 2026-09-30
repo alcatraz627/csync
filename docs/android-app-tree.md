@@ -33,7 +33,7 @@ csync (MainActivity holds Home, Share, Chat, Tools, Settings, Camera, More;
 │   foot: Pi screen row while idle ("Nothing is playing on the Pi screen"), mini player row while playing
 │   ├─ Pi screen                          child; the Pi output
 │   │   states: idle (cover + sources) · loading · playing · paused · buffering · finished · showing (image, text, slideshow, document, camera, screen) · offline · failed
-│   │   idle sections: From the Pi (Browse Media, Photos as a slideshow, The Pi camera) · From this phone (A file, A link, A note, This phone's screen) · This screen (Cover image, Display)
+│   │   idle sections: From the Pi (Photos as a slideshow, The Pi camera) · From this phone (A file, A link, A note, This phone's screen) · This screen (Cover image, Display)
 │   │   playing controls: seek, rewind, pause, forward, skip length, stop, favorite; Volume, Speed, Rotate, Loop tiles
 │   │   showing controls: Stop showing; for a document Previous, Page N of M, Next
 │   │   landscape: picture left, controls right
@@ -122,10 +122,16 @@ lit on Settings, Tools, Notes, the camera; Media stays lit on the Pi screen page
 | a bar place other than Home | Home (gesture only; the arrow is absent) |
 | Home | leaves the app (gesture only) |
 | From another app | the app that shared the item |
+| a page reached sideways from an item, or from a Search result | the page the item or the result was on |
 
 Inside a page the gesture shrinks the page as it moves (predictive back); at a
 root the system's own preview runs. Back never stops playback, never walks a
 folder and never changes a view.
+
+A page reached sideways is a visit: the crumbs still climb that page's own path
+(the Media crumb on a visited Pi screen page opens Media, the Notes crumb opens
+the list), and once a crumb or a bar place is tapped the visit is over and Back
+walks the path as usual. A visit never leaves a second copy of a place underneath.
 
 ### Down, from each place
 
@@ -160,7 +166,8 @@ this phone, Share with another app. Those choices move between places:
 
 | Choice | Lands on |
 |---|---|
-| Play on Pi screen, Show on Pi screen | Pi screen page (via From another app for a file on the phone) |
+| Play on Pi screen | Pi screen page (via From another app for a file on the phone) |
+| Show on Pi screen | sends in place; the page stays |
 | Play on this phone | This phone page, or the system player |
 | Send to a device | From another app, device chosen |
 | Send to a conversation | Conversation with the item attached |
