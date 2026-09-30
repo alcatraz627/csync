@@ -1,8 +1,8 @@
-<div align="center">
-  <img src="assets/cover.svg" alt="csync" width="112">
-</div>
+<p align="center">
+  <img src=".github/readme/banner.svg" alt="csync banner: Scattered machines, stay seated" width="100%">
+</p>
 
-<h1 align="center">csync</h1>
+<h1 align="center"><img src=".github/readme/favicon.svg" alt="" width="32" height="32"> csync</h1>
 
 <p align="center">
   Drive another laptop from this one after a single pasted line there, and leave
@@ -16,6 +16,13 @@
 </p>
 
 ---
+
+<details>
+<summary>Riddle answer</summary>
+
+The reverse tunnel: the target laptop dials out to the console itself, so nothing on its side listens on a network interface and no port forward or VPN is needed.
+
+</details>
 
 ## But why
 
@@ -177,3 +184,9 @@ bash tests/loopback.sh                    # end-to-end on one machine
 | [docs/principles.md](docs/principles.md) | what csync must never become |
 | [docs/spec.md](docs/spec.md) | the full normative definition: routes, the token, bootstrap, teardown |
 | [examples/pihub](examples/pihub) | a small hub example served on a Pi |
+
+---
+
+<p align="center">
+  <img src=".github/readme/art-1.svg" alt="csync artwork" width="100%">
+</p>
