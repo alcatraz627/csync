@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // A conversation is kept on this device, not on the phone that started it, so
@@ -211,6 +212,88 @@ func (s *convStore) list() []map[string]any {
 	return out
 }
 
+// maxSearchResults caps how many conversations one search returns.
+const maxSearchResults = 50
+
+// search finds the conversations where the owner or the assistant said q,
+// ignoring case, newest first. Each result carries a snippet around the first
+// place it was said and that message's position in the transcript.
+func (s *convStore) search(q string) []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, _ := os.ReadDir(s.dir)
+	out := []map[string]any{}
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok {
+			continue
+		}
+		c, err := s.load(id)
+		if err != nil {
+			continue
+		}
+		for i, entry := range c.Transcript {
+			if entry["role"] != "user" && entry["type"] != "text" {
+				continue
+			}
+			text, _ := entry["text"].(string)
+			at := indexFold(text, q)
+			if at < 0 {
+				continue
+			}
+			out = append(out, map[string]any{"id": c.ID, "title": c.Title, "updated": c.Updated,
+				"snippet": snippet(text, at), "index": i})
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["updated"].(int64) > out[j]["updated"].(int64) })
+	if len(out) > maxSearchResults {
+		out = out[:maxSearchResults]
+	}
+	return out
+}
+
+// indexFold is strings.Index ignoring case, returning a byte offset into s.
+func indexFold(s, sub string) int {
+	for i := range s {
+		if hasPrefixFold(s[i:], sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+func hasPrefixFold(s, prefix string) bool {
+	for _, want := range prefix {
+		got, size := utf8.DecodeRuneInString(s)
+		if size == 0 || got != want && !strings.EqualFold(string(got), string(want)) {
+			return false
+		}
+		s = s[size:]
+	}
+	return true
+}
+
+// snippet is about 120 characters of text on one line, starting a little before
+// the match at byte offset at, marked with ... where it was cut.
+func snippet(text string, at int) string {
+	const before, width = 40, 120
+	runes := []rune(text)
+	start := max(0, utf8.RuneCountInString(text[:at])-before)
+	end := min(len(runes), start+width)
+	if end == len(runes) {
+		start = max(0, end-width)
+	}
+	out := strings.Join(strings.Fields(string(runes[start:end])), " ")
+	if start > 0 {
+		out = "..." + out
+	}
+	if end < len(runes) {
+		out += "..."
+	}
+	return out
+}
+
 // titleFrom makes a short title from a first message: one line, cut at a word.
 func titleFrom(text string) string {
 	line := strings.TrimSpace(strings.SplitN(text, "\n", 2)[0])
@@ -227,12 +310,25 @@ func titleFrom(text string) string {
 // GET /conversations lists them, GET /conversations/<id> returns one in full,
 // POST /conversations/<id> changes its title, favourite, archive, model or effort,
 // POST /conversations/<id>/rewind cuts it back, and DELETE removes it.
+// GET /conversations/search?q= finds conversations by what was said in them.
 func conversationRoutes(mux *http.ServeMux, token string, convs *convStore) {
 	mux.HandleFunc("/conversations", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
 			return
 		}
 		writeJSON(w, map[string]any{"conversations": convs.list()})
+	})
+	// An exact path wins over the /conversations/ prefix, so "search" is never read as an id.
+	mux.HandleFunc("/conversations/search", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		if q == "" {
+			http.Error(w, "say what to search for with ?q=", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"results": convs.search(q)})
 	})
 	mux.HandleFunc("/conversations/", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {

@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,8 +34,10 @@ const chatGPTKey = "chatgpt-subscription"
 // API-only ids (gpt-5.4, the -codex names) were refused.
 var chatGPTModels = []string{"gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"}
 
+// chatGPTEndpoint is where chat goes on a ChatGPT plan; tests point it at a local fake.
+var chatGPTEndpoint = "https://chatgpt.com/backend-api/codex/responses"
+
 const (
-	chatGPTEndpoint = "https://chatgpt.com/backend-api/codex/responses"
 	chatGPTTokenURL = "https://auth.openai.com/oauth/token"
 	// The Codex CLI's public OAuth client id. A refresh must name the client that signed in.
 	chatGPTClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -136,41 +137,30 @@ func jwtExpiry(token string) time.Time {
 }
 
 // runChatGPT drives one user turn to a final answer on the subscription endpoint.
-func runChatGPT(model, effort, system string, history []gContent, emit func(turn)) ([]turn, error) {
+func runChatGPT(ctx context.Context, model, effort, system string, history []gContent, emit func(turn), delta func(string)) ([]turn, tokenCount, error) {
 	input := openAIInput(history)
-	var turns []turn
-	add := func(t turn) {
-		turns = append(turns, t)
-		if emit != nil {
-			emit(t)
-		}
-	}
+	st := newRunState(ctx, emit, delta)
 	for step := 0; step < maxToolSteps; step++ {
-		items, err := chatGPTStream(map[string]any{
+		if st.stopped() {
+			return st.stop()
+		}
+		st.step()
+		items, tokens, err := chatGPTStream(ctx, map[string]any{
 			"model": model, "instructions": system, "input": input, "tools": openAITools(),
 			"tool_choice": "auto", "parallel_tool_calls": false,
 			"reasoning": map[string]any{"effort": openAIEffort(effort), "summary": "auto"},
 			"store": false, "stream": true, "include": []string{"reasoning.encrypted_content"},
-		})
+		}, st.text)
+		if tokens.Reported {
+			st.count(tokens.In, tokens.Out)
+		}
 		if err != nil {
-			return turns, err
+			return st.fail(err)
 		}
 		var answer strings.Builder
 		called := false
 		for _, raw := range items {
-			var item struct {
-				Type      string `json:"type"`
-				CallID    string `json:"call_id"`
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-				Content   []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
-				Summary []struct {
-					Text string `json:"text"`
-				} `json:"summary"`
-			}
+			var item oaItem
 			if json.Unmarshal(raw, &item) != nil {
 				continue
 			}
@@ -180,7 +170,7 @@ func runChatGPT(model, effort, system string, history []gContent, emit func(turn
 			case "reasoning":
 				for _, s := range item.Summary {
 					if strings.TrimSpace(s.Text) != "" {
-						add(turn{Type: "thinking", Text: s.Text})
+						st.add(turn{Type: "thinking", Text: s.Text})
 					}
 				}
 			case "message":
@@ -194,88 +184,38 @@ func runChatGPT(model, effort, system string, history []gContent, emit func(turn
 				args := map[string]any{}
 				_ = json.Unmarshal([]byte(item.Arguments), &args)
 				result := executeTool(item.Name, args)
-				add(turn{Type: "tool_call", Name: item.Name, Args: args, Result: result})
+				st.add(turn{Type: "tool_call", Name: item.Name, Args: args, Result: result})
 				encoded, _ := json.Marshal(result)
 				input = append(input, map[string]any{"type": "function_call_output", "call_id": item.CallID, "output": string(encoded)})
 			}
 		}
 		if !called {
-			add(turn{Type: "text", Text: answer.String()})
-			return turns, nil
+			return st.answer(answer.String())
 		}
 	}
-	return turns, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
+	return st.turns, st.tokens, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
 }
 
-// chatGPTStream sends one request and returns the finished output items, in order, as raw JSON.
-func chatGPTStream(body map[string]any) ([]json.RawMessage, error) {
+// chatGPTStream sends one request and returns the finished output items, in
+// order, as raw JSON, handing each piece of answer text to onText on the way.
+func chatGPTStream(ctx context.Context, body map[string]any, onText func(string)) ([]json.RawMessage, tokenCount, error) {
 	access, account, err := chatGPTToken()
 	if err != nil {
-		return nil, err
+		return nil, tokenCount{}, err
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, tokenCount{}, err
 	}
-	req, err := http.NewRequest(http.MethodPost, chatGPTEndpoint, bytes.NewReader(encoded))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatGPTEndpoint, bytes.NewReader(encoded))
 	if err != nil {
-		return nil, err
+		return nil, tokenCount{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("chatgpt-account-id", account)
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("originator", "codex_cli_rs")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
-		var problem struct {
-			Detail string `json:"detail"`
-		}
-		if json.Unmarshal(raw, &problem) == nil && problem.Detail != "" {
-			return nil, fmt.Errorf("openai: %s", problem.Detail)
-		}
-		return nil, fmt.Errorf("openai returned %d: %s", resp.StatusCode, truncate(string(raw), 300))
-	}
-	var items []json.RawMessage
-	lines := bufio.NewScanner(resp.Body)
-	lines.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	for lines.Scan() {
-		data, ok := strings.CutPrefix(lines.Text(), "data:")
-		if !ok {
-			continue
-		}
-		var event struct {
-			Type     string          `json:"type"`
-			Item     json.RawMessage `json:"item"`
-			Response struct {
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			} `json:"response"`
-		}
-		if json.Unmarshal([]byte(strings.TrimSpace(data)), &event) != nil {
-			continue
-		}
-		switch event.Type {
-		case "response.output_item.done":
-			items = append(items, event.Item)
-		case "response.failed":
-			if event.Response.Error != nil {
-				return items, fmt.Errorf("openai: %s", event.Response.Error.Message)
-			}
-			return items, fmt.Errorf("openai: the response failed")
-		case "response.completed":
-			return items, nil
-		}
-	}
-	if err := lines.Err(); err != nil {
-		return items, err
-	}
-	return items, nil
+	items, _, tokens, err := responsesStream(req, onText)
+	return items, tokens, err
 }

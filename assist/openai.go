@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,63 +26,77 @@ type oaRequest struct {
 	Tools              []any        `json:"tools,omitempty"`
 	Reasoning          *oaReasoning `json:"reasoning,omitempty"`
 	PreviousResponseID string       `json:"previous_response_id,omitempty"`
+	Stream             bool         `json:"stream"`
 }
 
 type oaReasoning struct {
 	Effort string `json:"effort"`
 }
 
-type oaResponse struct {
-	ID     string `json:"id"`
-	Output []struct {
-		Type      string `json:"type"` // reasoning | function_call | message
-		CallID    string `json:"call_id"`
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-		Content   []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		Summary []struct {
-			Text string `json:"text"`
-		} `json:"summary"`
-	} `json:"output"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+// oaItem is one finished output item of a response: reasoning, a message, or a function call.
+type oaItem struct {
+	Type      string `json:"type"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Content   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	Summary []struct {
+		Text string `json:"text"`
+	} `json:"summary"`
 }
+
+// openAIBaseURL is where the OpenAI API lives; tests point it at a local fake.
+var openAIBaseURL = "https://api.openai.com"
 
 // Models that accept a reasoning effort. Sending one to a model that does not is an error.
 var oaReasoningModel = regexp.MustCompile(`^(gpt-5|o[0-9]|codex)`)
 
-func runOpenAI(key, model, effort, system string, history []gContent, emit func(turn)) ([]turn, error) {
+func runOpenAI(ctx context.Context, key, model, effort, system string, history []gContent, emit func(turn), delta func(string)) ([]turn, tokenCount, error) {
 	if key == chatGPTKey {
-		return runChatGPT(model, effort, system, history, emit)
+		return runChatGPT(ctx, model, effort, system, history, emit, delta)
 	}
-	req := oaRequest{Model: model, Instructions: system, Input: openAIInput(history), Tools: openAITools()}
+	req := oaRequest{Model: model, Instructions: system, Input: openAIInput(history), Tools: openAITools(), Stream: true}
 	if oaReasoningModel.MatchString(model) {
 		req.Reasoning = &oaReasoning{Effort: openAIEffort(effort)}
 	}
-	var turns []turn
-	add := func(t turn) {
-		turns = append(turns, t)
-		if emit != nil {
-			emit(t)
-		}
-	}
+	st := newRunState(ctx, emit, delta)
 	for step := 0; step < maxToolSteps; step++ {
-		resp, err := openAICall(key, req)
+		if st.stopped() {
+			return st.stop()
+		}
+		st.step()
+		body, err := json.Marshal(req)
 		if err != nil {
-			return turns, err
+			return st.fail(err)
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIBaseURL+"/v1/responses", bytes.NewReader(body))
+		if err != nil {
+			return st.fail(err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+key)
+		raws, id, tokens, err := responsesStream(httpReq, st.text)
+		if tokens.Reported {
+			st.count(tokens.In, tokens.Out)
+		}
+		if err != nil {
+			return st.fail(err)
 		}
 		var answer strings.Builder
 		var results []any
-		for _, item := range resp.Output {
+		for _, raw := range raws {
+			var item oaItem
+			if json.Unmarshal(raw, &item) != nil {
+				continue
+			}
 			switch item.Type {
 			case "reasoning":
 				for _, s := range item.Summary {
 					if strings.TrimSpace(s.Text) != "" {
-						add(turn{Type: "thinking", Text: s.Text})
+						st.add(turn{Type: "thinking", Text: s.Text})
 					}
 				}
 			case "message":
@@ -94,49 +109,96 @@ func runOpenAI(key, model, effort, system string, history []gContent, emit func(
 				args := map[string]any{}
 				_ = json.Unmarshal([]byte(item.Arguments), &args)
 				result := executeTool(item.Name, args)
-				add(turn{Type: "tool_call", Name: item.Name, Args: args, Result: result})
+				st.add(turn{Type: "tool_call", Name: item.Name, Args: args, Result: result})
 				encoded, _ := json.Marshal(result)
 				results = append(results, map[string]any{"type": "function_call_output", "call_id": item.CallID, "output": string(encoded)})
 			}
 		}
 		if len(results) == 0 {
-			add(turn{Type: "text", Text: answer.String()})
-			return turns, nil
+			return st.answer(answer.String())
 		}
 		req.Input = results
-		req.PreviousResponseID = resp.ID
+		req.PreviousResponseID = id
 	}
-	return turns, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
+	return st.turns, st.tokens, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
 }
 
-func openAICall(key string, req oaRequest) (oaResponse, error) {
-	body, err := json.Marshal(req)
+// responsesStream sends one streaming Responses request, the shape both the API
+// and the ChatGPT endpoint speak. It hands each piece of answer text to onText
+// as it arrives and returns the finished output items in order, the response id
+// and the tokens it used.
+func responsesStream(req *http.Request, onText func(string)) ([]json.RawMessage, string, tokenCount, error) {
+	var tokens tokenCount
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
 	if err != nil {
-		return oaResponse{}, err
-	}
-	httpReq, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
-	if err != nil {
-		return oaResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+key)
-	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(httpReq)
-	if err != nil {
-		return oaResponse{}, err
+		return nil, "", tokens, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	var out oaResponse
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return oaResponse{}, fmt.Errorf("openai unparseable (%d): %s", resp.StatusCode, truncate(string(raw), 300))
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4000))
+		var problem struct {
+			Detail string `json:"detail"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &problem) == nil && problem.Detail != "" {
+			return nil, "", tokens, fmt.Errorf("openai: %s", problem.Detail)
+		}
+		if problem.Error != nil {
+			return nil, "", tokens, fmt.Errorf("openai error: %s", problem.Error.Message)
+		}
+		return nil, "", tokens, fmt.Errorf("openai returned %d: %s", resp.StatusCode, truncate(string(raw), 300))
 	}
-	if out.Error != nil {
-		return oaResponse{}, fmt.Errorf("openai error: %s", out.Error.Message)
+	var items []json.RawMessage
+	id := ""
+	completed := false
+	err = readSSE(resp.Body, func(data []byte) (bool, error) {
+		var event struct {
+			Type     string          `json:"type"`
+			Delta    string          `json:"delta"`
+			Item     json.RawMessage `json:"item"`
+			Message  string          `json:"message"`
+			Response struct {
+				ID    string `json:"id"`
+				Usage *struct {
+					InputTokens  int64 `json:"input_tokens"`
+					OutputTokens int64 `json:"output_tokens"`
+				} `json:"usage"`
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(data, &event) != nil {
+			return false, nil
+		}
+		switch event.Type {
+		case "response.output_text.delta":
+			onText(event.Delta)
+		case "response.output_item.done":
+			items = append(items, event.Item)
+		case "response.failed":
+			if event.Response.Error != nil {
+				return true, fmt.Errorf("openai: %s", event.Response.Error.Message)
+			}
+			return true, fmt.Errorf("openai: the response failed")
+		case "error":
+			return true, fmt.Errorf("openai: %s", event.Message)
+		case "response.completed", "response.incomplete":
+			id, completed = event.Response.ID, true
+			if u := event.Response.Usage; u != nil {
+				tokens = tokenCount{In: u.InputTokens, Out: u.OutputTokens, Reported: true}
+			}
+			return true, nil
+		}
+		return false, nil
+	})
+	if err == nil && !completed {
+		err = fmt.Errorf("openai: the reply ended before it was complete")
 	}
-	if resp.StatusCode >= 300 {
-		return oaResponse{}, fmt.Errorf("openai returned %d: %s", resp.StatusCode, truncate(string(raw), 300))
-	}
-	return out, nil
+	return items, id, tokens, err
 }
 
 // openAIEffort maps the app's effort words to OpenAI's. There is no "off" that every model accepts, so it becomes low.

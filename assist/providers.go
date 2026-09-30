@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,10 @@ type providerInfo struct {
 }
 
 // A chat runner drives one user turn to a final answer through one provider.
-type chatRunner func(key, model, effort, system string, history []gContent, emit func(turn)) ([]turn, error)
+// emit gets each thinking, tool-call and answer turn as it happens, and delta
+// gets the answer's words as they are written; either may be nil. Cancelling
+// ctx stops the run and ends it with the answer so far, marked stopped.
+type chatRunner func(ctx context.Context, key, model, effort, system string, history []gContent, emit func(turn), delta func(string)) ([]turn, tokenCount, error)
 
 var chatRunners = map[string]chatRunner{"gemini": runChat, "claude": runClaude, "openai": runOpenAI}
 

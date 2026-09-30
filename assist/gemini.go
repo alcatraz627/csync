@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -88,10 +89,116 @@ type gResponse struct {
 		Content      gContent `json:"content"`
 		FinishReason string   `json:"finishReason"`
 	} `json:"candidates"`
+	UsageMetadata *struct {
+		PromptTokenCount     int64 `json:"promptTokenCount"`
+		CandidatesTokenCount int64 `json:"candidatesTokenCount"`
+		ThoughtsTokenCount   int64 `json:"thoughtsTokenCount"`
+	} `json:"usageMetadata"`
 	Error *struct {
 		Message string `json:"message"`
 		Status  string `json:"status"`
 	} `json:"error"`
+}
+
+// geminiBaseURL is where the Gemini API lives; tests point it at a local fake.
+var geminiBaseURL = "https://generativelanguage.googleapis.com"
+
+// streamGenerate makes one streaming call and returns the model's whole content
+// once it is complete, handing each piece of answer text to onText as it arrives.
+// Text split across chunks is joined back into one part, so the content can be
+// replayed to the model exactly as a single call would have returned it. The
+// token counts are Gemini's running totals from the last chunk; thinking counts
+// as output because it is billed as output.
+func streamGenerate(ctx context.Context, key, model string, req gRequest, onText func(string)) (gContent, tokenCount, error) {
+	var tokens tokenCount
+	body, err := json.Marshal(req)
+	if err != nil {
+		return gContent{}, tokens, err
+	}
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", geminiBaseURL, model)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return gContent{}, tokens, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", key)
+	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(httpReq)
+	if err != nil {
+		return gContent{}, tokens, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4000))
+		// An error before streaming starts comes back as one plain JSON object, sometimes wrapped in a list.
+		var gr gResponse
+		if json.Unmarshal(raw, &gr) == nil && gr.Error != nil {
+			return gContent{}, tokens, fmt.Errorf("gemini error: %s", gr.Error.Message)
+		}
+		var list []gResponse
+		if json.Unmarshal(raw, &list) == nil && len(list) > 0 && list[0].Error != nil {
+			return gContent{}, tokens, fmt.Errorf("gemini error: %s", list[0].Error.Message)
+		}
+		return gContent{}, tokens, fmt.Errorf("gemini returned %d: %s", resp.StatusCode, truncate(string(raw), 300))
+	}
+
+	content := gContent{Role: "model"}
+	candidate := false
+	err = readSSE(resp.Body, func(data []byte) (bool, error) {
+		var chunk gResponse
+		if json.Unmarshal(data, &chunk) != nil {
+			return false, nil
+		}
+		if chunk.Error != nil {
+			return true, fmt.Errorf("gemini error: %s", chunk.Error.Message)
+		}
+		if u := chunk.UsageMetadata; u != nil {
+			tokens = tokenCount{In: u.PromptTokenCount, Out: u.CandidatesTokenCount + u.ThoughtsTokenCount, Reported: true}
+		}
+		if len(chunk.Candidates) == 0 {
+			return false, nil
+		}
+		candidate = true
+		for _, p := range chunk.Candidates[0].Content.Parts {
+			if p.Text != "" && !p.Thought && onText != nil {
+				onText(p.Text)
+			}
+			content.Parts = mergePart(content.Parts, p)
+		}
+		return false, nil
+	})
+	if err == nil && !candidate {
+		err = fmt.Errorf("gemini returned no candidate")
+	}
+	return content, tokens, err
+}
+
+// mergePart adds one streamed part to the parts so far, joining a piece of text
+// onto the text before it when both are answer text or both are thinking.
+func mergePart(parts []gPart, p gPart) []gPart {
+	plain := func(q gPart) bool { return q.FunctionCall == nil && q.FunctionResponse == nil && q.InlineData == nil }
+	if len(parts) > 0 && plain(p) {
+		last := &parts[len(parts)-1]
+		// A part with no text only carries a signature for the text before it.
+		if plain(*last) && last.Text != "" && (p.Text == "" || last.Thought == p.Thought) {
+			last.Text += p.Text
+			if p.ThoughtSignature != "" {
+				last.ThoughtSignature = p.ThoughtSignature
+			}
+			return parts
+		}
+	}
+	return append(parts, p)
+}
+
+// answerText is the model's whole answer in a content, without its thinking.
+func answerText(c gContent) string {
+	var b strings.Builder
+	for _, p := range c.Parts {
+		if p.Text != "" && !p.Thought {
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
 }
 
 // generate makes one API call and returns the model's content (which may hold a

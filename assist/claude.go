@@ -16,11 +16,18 @@ import (
 // for every provider and converted to Claude's messages here, so switching model
 // mid-conversation keeps the thread.
 
+// claudeBaseURL overrides where the Messages API lives; tests point it at a local fake.
+var claudeBaseURL = ""
+
 // runClaude drives one user turn to a final answer through the Messages API,
-// running each tool Claude asks for and replaying the result, and reporting the
-// thinking and tool calls through emit as they happen.
-func runClaude(key, model, effort, system string, history []gContent, emit func(turn)) ([]turn, error) {
-	client := anthropic.NewClient(option.WithAPIKey(key))
+// running each tool Claude asks for and replaying the result. Thinking and tool
+// calls go to emit as they happen; the answer's words go to delta as they stream.
+func runClaude(ctx context.Context, key, model, effort, system string, history []gContent, emit func(turn), delta func(string)) ([]turn, tokenCount, error) {
+	opts := []option.RequestOption{option.WithAPIKey(key)}
+	if claudeBaseURL != "" {
+		opts = append(opts, option.WithBaseURL(claudeBaseURL))
+	}
+	client := anthropic.NewClient(opts...)
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
 		MaxTokens: 16000,
@@ -35,24 +42,23 @@ func runClaude(key, model, effort, system string, history []gContent, emit func(
 	}
 	messages := claudeMessages(history)
 
-	var turns []turn
-	add := func(t turn) {
-		turns = append(turns, t)
-		if emit != nil {
-			emit(t)
-		}
-	}
+	st := newRunState(ctx, emit, delta)
 	for step := 0; step < maxToolSteps; step++ {
+		if st.stopped() {
+			return st.stop()
+		}
+		st.step()
 		params.Messages = messages
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		resp, err := client.Messages.New(ctx, params)
-		cancel()
+		resp, err := claudeStream(ctx, client, params, st.text)
+		if resp.JSON.Usage.Valid() {
+			u := resp.Usage
+			st.count(u.InputTokens+u.CacheCreationInputTokens+u.CacheReadInputTokens, u.OutputTokens)
+		}
 		if err != nil {
-			return turns, fmt.Errorf("claude: %w", err)
+			return st.fail(fmt.Errorf("claude: %w", err))
 		}
 		if resp.StopReason == anthropic.StopReasonRefusal {
-			add(turn{Type: "text", Text: "Claude declined this request. Try rephrasing it, or switch to another model for this conversation."})
-			return turns, nil
+			return st.answer("Claude declined this request. Try rephrasing it, or switch to another model for this conversation.")
 		}
 		// The whole reply, thinking included, goes back unchanged so the next call can continue from it.
 		messages = append(messages, resp.ToParam())
@@ -63,7 +69,7 @@ func runClaude(key, model, effort, system string, history []gContent, emit func(
 			switch b := block.AsAny().(type) {
 			case anthropic.ThinkingBlock:
 				if strings.TrimSpace(b.Thinking) != "" {
-					add(turn{Type: "thinking", Text: b.Thinking})
+					st.add(turn{Type: "thinking", Text: b.Thinking})
 				}
 			case anthropic.TextBlock:
 				answer.WriteString(b.Text)
@@ -71,7 +77,7 @@ func runClaude(key, model, effort, system string, history []gContent, emit func(
 				args := map[string]any{}
 				_ = json.Unmarshal([]byte(b.JSON.Input.Raw()), &args)
 				result := executeTool(b.Name, args)
-				add(turn{Type: "tool_call", Name: b.Name, Args: args, Result: result})
+				st.add(turn{Type: "tool_call", Name: b.Name, Args: args, Result: result})
 				encoded, _ := json.Marshal(result)
 				results = append(results, anthropic.NewToolResultBlock(b.ID, string(encoded), false))
 			}
@@ -79,14 +85,35 @@ func runClaude(key, model, effort, system string, history []gContent, emit func(
 		if resp.StopReason != anthropic.StopReasonToolUse {
 			text := answer.String()
 			if resp.StopReason == anthropic.StopReasonMaxTokens {
-				text += "\n\n(The answer was cut off at the length limit.)"
+				const cut = "\n\n(The answer was cut off at the length limit.)"
+				st.text(cut)
+				text += cut
 			}
-			add(turn{Type: "text", Text: text})
-			return turns, nil
+			return st.answer(text)
 		}
 		messages = append(messages, anthropic.NewUserMessage(results...))
 	}
-	return turns, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
+	return st.turns, st.tokens, fmt.Errorf("stopped after %d tool steps (safety ceiling) without a final answer", maxToolSteps)
+}
+
+// claudeStream makes one streaming Messages call and returns the whole message
+// once it is complete, handing each piece of answer text to onText as it arrives.
+func claudeStream(ctx context.Context, client anthropic.Client, params anthropic.MessageNewParams, onText func(string)) (anthropic.Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	stream := client.Messages.NewStreaming(ctx, params)
+	defer stream.Close()
+	var msg anthropic.Message
+	for stream.Next() {
+		event := stream.Current()
+		if err := msg.Accumulate(event); err != nil {
+			return msg, err
+		}
+		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
+			onText(event.Delta.Text)
+		}
+	}
+	return msg, stream.Err()
 }
 
 // claudeEffort maps the app's effort words to Claude's. Thinking cannot be turned
