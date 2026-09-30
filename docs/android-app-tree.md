@@ -123,6 +123,7 @@ lit on Settings, Tools, Notes, the camera; Media stays lit on the Pi screen page
 | Home | leaves the app (gesture only) |
 | From another app | the app that shared the item |
 | a page reached sideways from an item, or from a Search result | the page the item or the result was on |
+| a page opened from Home (the Ask and Camera tiles, the status line, a Pick up row) | Home; a crumb still climbs that page's own path |
 
 Inside a page the gesture shrinks the page as it moves (predictive back); at a
 root the system's own preview runs. Back never stops playback, never walks a
