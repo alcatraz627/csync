@@ -76,6 +76,8 @@ class State:
         self.camera = camera
         # The camera listener and stop flag while the live picture is on the Pi screen.
         self.camera_feed: tuple[queue.Queue, threading.Event] | None = None
+        # The phone whose screen is on the Pi screen: set while its frames are being read.
+        self.screen_feed: threading.Event | None = None
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
         self.pin_files_root = database.parent / "pin-files"
@@ -633,6 +635,8 @@ class State:
             return False
         settings = self.display_settings_now()
         self._start_player()
+        # A live feed leaves mpv untimed and expecting MJPEG; the cover is a plain picture again.
+        self._plain_picture()
         # The cover is framed the way the screen in use asks: turned with the screen and then by
         # its own quarter turns, and cropped to fill, shown whole, or pulled to the edges.
         self._mpv(["set_property", "video-rotate", (settings["rotate"] + settings["coverRotate"]) % 360])
@@ -701,6 +705,8 @@ class State:
         self.display_text = None
         if kind == "camera":
             self._end_camera_feed()
+        if kind == "screen":
+            self._end_screen_feed()
         try:
             if kind == "text":
                 self._mpv({"name": "osd-overlay", "id": screen.TEXT_OVERLAY_ID, "format": "none", "data": ""})
@@ -771,6 +777,72 @@ class State:
                     pass
             pipe.unlink(missing_ok=True)
 
+    # ---- a phone's screen on the Pi screen ----
+    #
+    # The phone sends JPEG frames in one long request; they go to mpv through a pipe like the
+    # camera's. The request ends when the phone stops sharing, or when the screen is stopped here.
+
+    def show_phone_screen(self, frames, name: str = "") -> dict:
+        """Show a phone's screen for as long as it keeps sending; returns when the sharing ends."""
+        label = re.sub(r"[\x00-\x1f\x7f]", "", name or "").strip()[:120] or "Phone screen"
+        pipe = self.database.parent / "screen-live.mjpeg"
+        stop = threading.Event()
+        with self.lock:
+            self._end_screen_feed()
+            pipe.unlink(missing_ok=True)
+            os.mkfifo(pipe, 0o600)
+            # Showing clears whatever was up, so the new feed is registered only once it is on.
+            shown = self._show_on_screen([str(pipe)], "screen", label, live=True)
+            if not shown["sentToDisplay"]:
+                pipe.unlink(missing_ok=True)
+                return shown
+            self.screen_feed = stop
+        writer = None
+        try:
+            for _ in range(100):
+                if stop.is_set():
+                    break
+                try:
+                    writer = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            if writer is not None:
+                os.set_blocking(writer, True)
+                for frame in frames:
+                    if stop.is_set():
+                        break
+                    os.write(writer, frame)
+        except OSError:
+            pass
+        finally:
+            if writer is not None:
+                try:
+                    os.close(writer)
+                except OSError:
+                    pass
+            pipe.unlink(missing_ok=True)
+            with self.lock:
+                # The phone stopped on its own: the screen goes back to the cover.
+                if self.screen_feed is stop:
+                    self.screen_feed = None
+                    self._clear_showing()
+                    try:
+                        self._mpv(["stop"])
+                        self.show_wallpaper()
+                    except MediaError:
+                        pass
+                    self.pi.update(itemId=None, state="idle", positionMs=0, rotation=0, loop=False)
+                    self.pi["revision"] += 1
+        return {"shown": True, "ended": True, "player": self.pi_state()}
+
+    def _end_screen_feed(self):
+        feed = self.screen_feed
+        if feed is None:
+            return
+        self.screen_feed = None
+        feed.set()
+
     def _screen_size(self) -> tuple[int, int]:
         """The size mpv is drawing at, else the connected mode, else full HD."""
         try:
@@ -833,6 +905,8 @@ class State:
                 self._mpv(["loadfile", paths[0], "replace"])
                 for extra in paths[1:]:
                     self._mpv(["loadfile", extra, "append"])
+                # A still that ran out under keep-open leaves mpv paused; lifting pause before the load did not stick.
+                self._mpv(["set_property", "pause", False])
                 if text:
                     self.display_text, self.display_size = text, size
                     self._draw_text(rotate)
@@ -1494,6 +1568,26 @@ def handler_for(state: State, token: str):
                 return False
             return len(expected) >= 32 and secrets.compare_digest(expected, provided)
 
+        def _chunks(self):
+            """The pieces of a chunked request body, one at a time, until the phone sends the last one."""
+            while True:
+                size_line = self.rfile.readline(64)
+                if not size_line:
+                    return
+                try:
+                    size = int(size_line.split(b";", 1)[0].strip(), 16)
+                except ValueError:
+                    return
+                if size == 0:
+                    return
+                if size > 8 * 1024 * 1024:
+                    return
+                data = self.rfile.read(size)
+                self.rfile.readline(4)
+                if len(data) < size:
+                    return
+                yield data
+
         def _body(self, max_length: int = 16384) -> dict:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -1683,6 +1777,11 @@ def handler_for(state: State, token: str):
                     raise MediaError("DISPLAY_INVALID", "Send a picture, a PDF, or text as JSON", 415)
                 if path == "/v1/display/camera":
                     return self._json(200, state.show_camera())
+                if path == "/v1/display/screen":
+                    if self.headers.get("Transfer-Encoding", "").lower() != "chunked":
+                        raise MediaError("DISPLAY_INVALID", "Send the screen as chunked JPEG frames", 400)
+                    self.connection.settimeout(20)
+                    return self._json(200, state.show_phone_screen(self._chunks(), query.get("name", [""])[0]))
                 body = self._body()
                 if path == "/v1/display/slideshow":
                     return self._json(200, state.slideshow(body))

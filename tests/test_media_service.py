@@ -634,6 +634,53 @@ class MediaServiceTest(unittest.TestCase):
             status, result = self.upload("/v1/display/show", pdf, {"Content-Type": "application/pdf"})
             self.assertEqual((status, result["code"]), (501, "DOCUMENT_UNAVAILABLE"))
 
+    def test_phone_screen_frames_reach_the_screen_through_a_pipe_until_the_phone_stops(self):
+        self.state.wallpaper.write_bytes(b"cover")
+        pipe = Path(self.tmp.name) / "screen-live.mjpeg"
+        frames = [b"\xff\xd8" + bytes([n]) * 300 + b"\xff\xd9" for n in (1, 2)]
+        seen = bytearray()
+
+        def watch_like_mpv():
+            for _ in range(100):
+                if pipe.exists():
+                    break
+                time.sleep(0.05)
+            with open(pipe, "rb") as reader:
+                while True:
+                    chunk = reader.read(4096)
+                    if not chunk:
+                        return
+                    seen.extend(chunk)
+
+        def send():
+            time.sleep(0.2)
+            for frame in frames:
+                yield frame
+                time.sleep(0.1)
+
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()) as mpv, \
+                patch.object(self.state, "show_wallpaper", return_value=True) as cover:
+            watcher = threading.Thread(target=watch_like_mpv, daemon=True)
+            watcher.start()
+            conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=10)
+            conn.request("POST", "/v1/display/screen?name=Pixel", body=send(),
+                         headers={"X-Csync-Token": "secret", "Transfer-Encoding": "chunked"}, encode_chunked=True)
+            response = conn.getresponse()
+            result = json.loads(response.read())
+            conn.close()
+            watcher.join(timeout=5)
+            self.assertEqual((response.status, result["ended"], result["player"]["state"]), (200, True, "idle"))
+            self.assertEqual(bytes(seen), b"".join(frames))
+            mpv.assert_any_call(["loadfile", str(pipe), "replace"])
+            mpv.assert_any_call(["set_property", "demuxer-lavf-format", "mjpeg"])
+            mpv.assert_any_call(["set_property", "untimed", True])
+            cover.assert_called()
+            self.assertFalse(pipe.exists())
+            self.assertIsNone(self.state.screen_feed)
+            status, result = self.upload("/v1/display/screen", b"nochunks", {"Content-Type": "image/jpeg"})
+            self.assertEqual((status, result["code"]), (400, "DISPLAY_INVALID"))
+
     def test_text_is_laid_out_large_and_cut_only_after_a_whole_word(self):
         from media import screen
         short = screen.layout("Hello", "Dinner is ready", 1920, 1080)
