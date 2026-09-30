@@ -95,6 +95,37 @@ The phone side is a separate app,
 [csync-hub](https://github.com/alcatraz627/csync-hub). These share the mesh token
 and the tailnet as their trust boundary, the same as the console and target.
 
+## How the assistant streams a reply
+
+The phone sends `POST /chat?stream=1` with `{session, message, model, effort,
+attachments}` and reads one JSON object per line until the `done` line:
+
+| Line | When |
+|---|---|
+| `{"delta": {"text": "..."}}` | New words of the answer, as the model writes them. A preview only; never saved. |
+| `{"turn": {...}}` | A whole step: `thinking`, `tool_call`, or the final `text`. The text turn replaces the preview. |
+| `{"error": "..."}` | The run failed. Not sent when the owner stopped it. |
+| `{"usage": {"input_tokens", "output_tokens", "ms", "model"}}` | Just before `done`. Tokens are summed over every tool step and left out when the provider reports none. |
+| `{"done": true, "reply": "...", "stopped": true}` | Last line. `stopped` appears only after a stop. |
+
+Words the model writes before it decides to call a tool also stream as deltas,
+because the server cannot know a tool call is coming. The app should drop its
+preview when a `tool_call` turn arrives.
+
+One conversation runs one reply at a time; a second `/chat` for it gets `409`.
+`POST /chat/stop` with `{session}` answers `{"ok": true, "stopped": true|false}`
+and ends the reply with a text turn holding what had arrived, marked
+`"stopped": true`. A tool that is already running finishes first. A phone that
+drops its connection does not stop the reply: the Pi keeps going and saves it,
+so the phone can pull it from `/conversations/<id>`. The saved final text turn
+carries the same `usage` object.
+
+`GET /conversations/search?q=` finds conversations by what the owner or the
+assistant said, ignoring case, newest first, at most 50, each with a snippet and
+the transcript index of the first match. A conversation whose id is literally
+`search` cannot be read by id. `GET /skills` lists the saved skills for the
+slash menu as `{"skills": [{"name", "summary"}]}`.
+
 ## Where state lives
 
 | Path | Whose | What |
