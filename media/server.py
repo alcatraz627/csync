@@ -495,6 +495,14 @@ class State:
                        (json.dumps(merged), name, display_id))
             row = db.execute("SELECT id,detected_name,custom_name,port,size,last_seen,settings FROM displays "
                              "WHERE id=?", (display_id,)).fetchone()
+        # A change to the cover's framing shows at once when that cover is what the screen is showing.
+        if connected and connected[0] == display_id and {"coverFit", "coverRotate"} & settings.keys():
+            with self.lock:
+                if self.pi["state"] == "idle":
+                    try:
+                        self.show_wallpaper()
+                    except MediaError:
+                        pass
         return self._display_row(row, connected)
 
     def display_settings_now(self) -> dict:
@@ -618,11 +626,21 @@ class State:
     def show_wallpaper(self) -> bool:
         if not self.wallpaper.is_file():
             return False
+        settings = self.display_settings_now()
         self._start_player()
-        self._mpv(["set_property", "video-rotate", 0])
+        # The cover is framed the way the screen in use asks: turned with the screen and then by
+        # its own quarter turns, and cropped to fill, shown whole, or pulled to the edges.
+        self._mpv(["set_property", "video-rotate", (settings["rotate"] + settings["coverRotate"]) % 360])
+        self._mpv(["set_property", "panscan", 1.0 if settings["coverFit"] == "cover" else 0.0])
+        self._mpv(["set_property", "keepaspect", settings["coverFit"] != "stretch"])
         self._mpv(["set_property", "loop-file", "no"])
         self._mpv(["loadfile", str(self.wallpaper), "replace"])
         return True
+
+    def _plain_picture(self):
+        """Undo the cover's framing before anything else is drawn, so a film is never cropped or pulled."""
+        self._mpv(["set_property", "panscan", 0.0])
+        self._mpv(["set_property", "keepaspect", True])
 
     def set_wallpaper(self, image: bytes) -> dict:
         if len(image) < 100 or len(image) > 10 * 1024 * 1024 or not image.startswith(b"\xff\xd8\xff"):
@@ -729,6 +747,7 @@ class State:
             try:
                 self._start_player()
                 size = self._screen_size() if text else None
+                self._plain_picture()
                 self._mpv(["set_property", "pause", False])
                 self._mpv(["set_property", "loop-file", "no"])
                 self._mpv(["set_property", "video-rotate", rotate])
@@ -922,6 +941,7 @@ class State:
                 settings = self.display_settings_now()
                 self._clear_showing()
                 self._start_player()
+                self._plain_picture()
                 self._mpv(["set_property", "volume", settings["startVolume"]])
                 self._mpv(["set_property", "pause", False])
                 self._mpv(["set_property", "video-rotate", settings["rotate"]])

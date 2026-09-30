@@ -455,7 +455,8 @@ class MediaServiceTest(unittest.TestCase):
         self.assertEqual((status, len(listed["displays"]), listed["current"]), (200, 1, monitor["id"]))
         self.assertEqual((monitor["id"], monitor["name"], monitor["port"], monitor["size"], monitor["connected"]),
                          ("port-HDMI-A-1-1920x1080", "HDMI0 screen", "HDMI0", "1920 by 1080", True))
-        self.assertEqual(monitor["settings"], {"rotate": 0, "startVolume": 0, "sound": "display"})
+        self.assertEqual(monitor["settings"], {"rotate": 0, "startVolume": 0, "sound": "display",
+                                               "coverFit": "cover", "coverRotate": 0})
         self.assertIsInstance(monitor["lastSeen"], int)
         sets, player = self.play_and_capture()
         self.assertEqual((sets["volume"], sets["video-rotate"], player["volume"]), (0, 0, 0))
@@ -476,10 +477,11 @@ class MediaServiceTest(unittest.TestCase):
                                                       "settings": {"rotate": 180, "startVolume": 35}})
         saved = json.loads(data)["display"]
         self.assertEqual((status, saved["name"], saved["settings"]),
-                         (200, "Desk monitor", {"rotate": 180, "startVolume": 35, "sound": "display"}))
+                         (200, "Desk monitor", {"rotate": 180, "startVolume": 35, "sound": "display",
+                                                "coverFit": "cover", "coverRotate": 0}))
         status, data, _ = self.request("PUT", route, {"settings": {"sound": "headphones"}})
         self.assertEqual(json.loads(data)["display"]["settings"],
-                         {"rotate": 180, "startVolume": 35, "sound": "headphones"})
+                         {"rotate": 180, "startVolume": 35, "sound": "headphones", "coverFit": "cover", "coverRotate": 0})
         sets, player = self.play_and_capture()
         self.assertEqual((sets["volume"], sets["video-rotate"], player["volume"], player["rotation"]),
                          (35, 180, 35, 180))
@@ -1005,6 +1007,25 @@ class MediaServiceTest(unittest.TestCase):
             status, data, _ = self.request("POST", "/v1/player/pi/immediate", {"action": "stop"})
             self.assertEqual((status, json.loads(data)["player"]["state"]), (200, "idle"))
             show.assert_called_once()
+
+    def test_cover_framing_is_kept_per_screen_and_applied_to_the_cover_only(self):
+        self.connector("HDMI-A-1", "connected")
+        route = "/v1/displays/port-HDMI-A-1-1920x1080"
+        for body, field in (({"settings": {"coverFit": "zoom"}}, "settings.coverFit"),
+                            ({"settings": {"coverRotate": 45}}, "settings.coverRotate")):
+            status, data, _ = self.request("PUT", route, body)
+            self.assertEqual((status, json.loads(data)["field"]), (400, field))
+        self.state.wallpaper.write_bytes(b"image")
+        with patch.object(self.state, "_mpv", return_value={"error": "success"}) as mpv, \
+                patch.object(self.state, "_start_player"):
+            status, data, _ = self.request("PUT", route, {"settings": {"coverFit": "contain", "coverRotate": 90, "rotate": 180}})
+            self.assertEqual(status, 200)
+            # The screen was idle, so the newly framed cover went up at once: turned by both, shown whole.
+            sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list if c.args[0][0] == "set_property"}
+            self.assertEqual((sets["video-rotate"], sets["panscan"], sets["keepaspect"]), (270, 0.0, True))
+        # Playing a film undoes the framing, and keeps only the screen's own turn.
+        sets, _ = self.play_and_capture()
+        self.assertEqual((sets["video-rotate"], sets["panscan"], sets["keepaspect"]), (180, 0.0, True))
 
     def test_a_listed_folder_says_how_many_things_opening_it_would_show(self):
         (self.root / "folder" / "inner").mkdir()

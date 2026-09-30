@@ -16,8 +16,11 @@ from .library import MediaError
 
 # What a screen gets until the owner changes it: the volume and rotation every
 # playback used before screens were remembered, so nothing changes on its own.
-DEFAULT_SETTINGS = {"rotate": 0, "startVolume": 0, "sound": "display"}
+# The cover fills the screen edge to edge, the way it was shown before it could be framed.
+DEFAULT_SETTINGS = {"rotate": 0, "startVolume": 0, "sound": "display", "coverFit": "cover", "coverRotate": 0}
 SOUND_OUTPUTS = ("display", "headphones")
+# How the cover meets the screen's edges: cropped to fill, whole with bars, or pulled to fit.
+COVER_FITS = ("cover", "contain", "stretch")
 EDID_HEADER = b"\x00\xff\xff\xff\xff\xff\xff\x00"
 
 
@@ -129,6 +132,12 @@ def validate_update(body: dict) -> tuple[str | None, dict]:
         elif key == "sound":
             if value not in SOUND_OUTPUTS:
                 raise MediaError("DISPLAY_INVALID", "Sound goes to the display or the headphones", 400, field)
+        elif key == "coverFit":
+            if value not in COVER_FITS:
+                raise MediaError("DISPLAY_INVALID", "The cover fits by cover, contain or stretch", 400, field)
+        elif key == "coverRotate":
+            if type(value) is not int or value not in (0, 90, 180, 270):
+                raise MediaError("DISPLAY_INVALID", "Turn the cover by 0, 90, 180 or 270 degrees", 400, field)
         else:
             raise MediaError("DISPLAY_INVALID", f"{str(key)[:40]} is not a screen setting", 400, field)
     return name, dict(settings)
