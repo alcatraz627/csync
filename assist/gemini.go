@@ -187,6 +187,14 @@ func mergePart(parts []gPart, p gPart) []gPart {
 			return parts
 		}
 	}
+	// Gemini refuses a replayed turn holding a part with no data, and streams one
+	// after tool calls. Drop it; its signature goes to the part before if that has none.
+	if plain(p) && p.Text == "" {
+		if len(parts) > 0 && p.ThoughtSignature != "" && parts[len(parts)-1].ThoughtSignature == "" {
+			parts[len(parts)-1].ThoughtSignature = p.ThoughtSignature
+		}
+		return parts
+	}
 	return append(parts, p)
 }
 
