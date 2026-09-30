@@ -71,6 +71,8 @@ class State:
         self.mpv_socket = mpv_socket
         self.player_command = player_command
         self.camera = camera
+        # The camera listener and stop flag while the live picture is on the Pi screen.
+        self.camera_feed: tuple[queue.Queue, threading.Event] | None = None
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
         self.pin_files_root = database.parent / "pin-files"
@@ -641,6 +643,8 @@ class State:
         """Undo the cover's framing before anything else is drawn, so a film is never cropped or pulled."""
         self._mpv(["set_property", "panscan", 0.0])
         self._mpv(["set_property", "keepaspect", True])
+        self._mpv(["set_property", "demuxer-lavf-format", ""])
+        self._mpv(["set_property", "untimed", False])
 
     def set_wallpaper(self, image: bytes) -> dict:
         if len(image) < 100 or len(image) > 10 * 1024 * 1024 or not image.startswith(b"\xff\xd8\xff"):
@@ -691,6 +695,8 @@ class State:
         # The name belonged to what was shown; an idle screen has none.
         self.pi.pop("name", None)
         self.display_text = None
+        if kind == "camera":
+            self._end_camera_feed()
         try:
             if kind == "text":
                 self._mpv({"name": "osd-overlay", "id": screen.TEXT_OVERLAY_ID, "format": "none", "data": ""})
@@ -698,6 +704,68 @@ class State:
                 self._mpv(["set_property", "loop-playlist", "no"])
         except MediaError:
             pass
+
+    # ---- the live camera on the Pi screen ----
+    #
+    # The camera's frames go to mpv through a named pipe in the state folder, never over
+    # HTTP: mpv logs every option it is given, so a token in an option would land in mpv.log.
+
+    def show_camera(self) -> dict:
+        """Put the live camera picture on the Pi screen. Stopping the screen ends it and lets the camera rest."""
+        if self.camera is None:
+            raise MediaError("CAMERA_UNAVAILABLE", "This Pi has no camera", 404)
+        pipe = self.database.parent / "camera-live.mjpeg"
+        with self.lock:
+            self._end_camera_feed()
+            pipe.unlink(missing_ok=True)
+            os.mkfifo(pipe, 0o600)
+            listener = self.camera.subscribe()
+            stop = threading.Event()
+            feed = threading.Thread(target=self._feed_camera, args=(pipe, listener, stop), daemon=True)
+            self.camera_feed = (listener, stop)
+            feed.start()
+        return self._show_on_screen([str(pipe)], "camera", "Pi camera", live=True)
+
+    def _end_camera_feed(self):
+        feed = self.camera_feed
+        if feed is None:
+            return
+        self.camera_feed = None
+        listener, stop = feed
+        stop.set()
+        self.camera.unsubscribe(listener)
+
+    def _feed_camera(self, pipe: Path, listener: queue.Queue, stop: threading.Event):
+        """Copy camera frames into the pipe until the screen moves on or mpv lets go of it."""
+        writer = None
+        try:
+            # A pipe opens for writing only once mpv has opened it to read; wait for that without blocking forever.
+            for _ in range(100):
+                if stop.is_set():
+                    return
+                try:
+                    writer = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            if writer is None:
+                return
+            os.set_blocking(writer, True)
+            while not stop.is_set():
+                try:
+                    frame = listener.get(timeout=5)
+                except queue.Empty:
+                    continue
+                os.write(writer, frame)
+        except OSError:
+            pass
+        finally:
+            if writer is not None:
+                try:
+                    os.close(writer)
+                except OSError:
+                    pass
+            pipe.unlink(missing_ok=True)
 
     def _screen_size(self) -> tuple[int, int]:
         """The size mpv is drawing at, else the connected mode, else full HD."""
@@ -723,7 +791,7 @@ class State:
                    "res_x": width, "res_y": height})
 
     def _show_on_screen(self, paths: list[str], kind: str, name: str, seconds: int | None = None,
-                        text: tuple[str | None, str] | None = None) -> dict:
+                        text: tuple[str | None, str] | None = None, live: bool = False) -> dict:
         """Put a picture, text or slideshow on the Pi screen in place of whatever was there.
 
         Playback that was running is saved to history and ended, like a Stop. A
@@ -748,6 +816,9 @@ class State:
                 self._start_player()
                 size = self._screen_size() if text else None
                 self._plain_picture()
+                # A live feed is a bare stream of JPEG frames with no clock; mpv draws each as it comes.
+                self._mpv(["set_property", "demuxer-lavf-format", "mjpeg" if live else ""])
+                self._mpv(["set_property", "untimed", live])
                 self._mpv(["set_property", "pause", False])
                 self._mpv(["set_property", "loop-file", "no"])
                 self._mpv(["set_property", "video-rotate", rotate])
@@ -1543,6 +1614,8 @@ def handler_for(state: State, token: str):
                     if content_type == "application/json":
                         return self._json(200, state.show_text(self._body(64 * 1024)))
                     raise MediaError("DISPLAY_INVALID", "Send a picture, or text as JSON", 415)
+                if path == "/v1/display/camera":
+                    return self._json(200, state.show_camera())
                 body = self._body()
                 if path == "/v1/display/slideshow":
                     return self._json(200, state.slideshow(body))

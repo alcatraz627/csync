@@ -5,6 +5,7 @@ import io
 import queue
 import sqlite3
 import socket
+import stat
 import time
 import tempfile
 import threading
@@ -1077,6 +1078,57 @@ class MediaServiceTest(unittest.TestCase):
         time.sleep(7)
         self.assertEqual(camera.viewers, 0)
         conn.close()
+
+    def test_live_camera_goes_to_the_screen_through_a_pipe_and_stops_with_it(self):
+        frame = b"\xff\xd8" + b"cam" * 100 + b"\xff\xd9"
+
+        class SteadyCamera:
+            def __init__(self):
+                self.viewers = 0
+            def subscribe(self):
+                self.viewers += 1
+                frames = queue.Queue(maxsize=2)
+                frames.put(frame)
+                frames.put(frame)
+                return frames
+            def unsubscribe(self, listener):
+                self.viewers -= 1
+        camera = SteadyCamera()
+        self.state.camera = camera
+        self.state.mpv_socket = Path(self.tmp.name) / "mpv.sock"
+        self.state.mpv_socket.touch()
+        pipe = self.state.database.parent / "camera-live.mjpeg"
+        with patch.object(self.state, "_mpv", return_value={"error": "success"}) as mpv, \
+                patch.object(self.state, "_start_player"):
+            status, data, _ = self.request("POST", "/v1/display/camera")
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(data)["player"]["kind"], "camera")
+            self.assertTrue(stat.S_ISFIFO(pipe.stat().st_mode))
+            sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list if c.args[0][0] == "set_property"}
+            self.assertEqual((sets["demuxer-lavf-format"], sets["untimed"]), ("mjpeg", True))
+            mpv.assert_any_call(["loadfile", str(pipe), "replace"])
+            # Standing in for mpv: read the pipe and get the camera's frames back to back.
+            reader = os.open(pipe, os.O_RDONLY)
+            got = b""
+            while len(got) < 2 * len(frame):
+                got += os.read(reader, 65536)
+            os.close(reader)
+            self.assertEqual(got[:len(frame)], frame)
+            self.assertEqual(camera.viewers, 1)
+            status, data, _ = self.request("POST", "/v1/player/pi/immediate", {"action": "stop"})
+            self.assertEqual((status, json.loads(data)["player"]["state"]), (200, "idle"))
+            self.assertEqual(camera.viewers, 0)
+            for _ in range(50):
+                if not pipe.exists():
+                    break
+                time.sleep(0.1)
+            self.assertFalse(pipe.exists())
+            # The next thing shown gets a plain demuxer and a clock again.
+            mpv.reset_mock()
+            self.state.show_text({"text": "after the camera"})
+            sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list
+                    if isinstance(c.args[0], list) and c.args[0][0] == "set_property"}
+            self.assertEqual((sets["demuxer-lavf-format"], sets["untimed"]), ("", False))
 
 
 if __name__ == "__main__":
