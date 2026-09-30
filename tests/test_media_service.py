@@ -332,6 +332,106 @@ class MediaServiceTest(unittest.TestCase):
         with self.state._db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM note_files").fetchone()[0], 0)
 
+    @staticmethod
+    def edid(name, serial, maker="ACR", product=0x1234):
+        data = bytearray(128)
+        data[:8] = b"\x00\xff\xff\xff\xff\xff\xff\x00"
+        word = sum((ord(letter) - 64) << shift for letter, shift in zip(maker, (10, 5, 0)))
+        data[8:10] = bytes([word >> 8, word & 0xFF])
+        data[10:12] = product.to_bytes(2, "little")
+        data[54:56] = b"\x01\x01"
+        data[56], data[58] = 1280 & 0xFF, (1280 >> 8) << 4
+        data[59], data[61] = 800 & 0xFF, (800 >> 8) << 4
+        for offset, tag, text in ((72, 0xFC, name), (90, 0xFF, serial)):
+            data[offset:offset + 5] = bytes([0, 0, 0, tag, 0])
+            data[offset + 5:offset + 18] = (text.encode() + b"\n").ljust(13, b" ")
+        return bytes(data)
+
+    def connector(self, name, status, edid=b"", modes="1920x1080\n1280x720\n"):
+        folder = Path(self.tmp.name) / "drm" / ("card1-" + name)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "status").write_text(status + "\n")
+        (folder / "edid").write_bytes(edid)
+        (folder / "modes").write_text(modes)
+        self.state.drm_root = folder.parent
+
+    def play_and_capture(self):
+        item = self.item()
+        self.state.mpv_socket = Path(self.tmp.name) / "mpv.sock"
+        self.state.mpv_socket.touch()
+        def reply(command):
+            if command[0] in ("loadfile", "set_property"):
+                return {"error": "success"}
+            return {"data": {"idle-active": False, "time-pos": 1.0, "duration": 80.0,
+                             "pause": False, "eof-reached": False, "volume": None,
+                             "path": str(self.root / "Movie α.mp4")}[command[1]]}
+        with patch.object(self.state, "_start_player"), patch.object(self.state, "_mpv", side_effect=reply) as mpv, \
+                patch.object(self.state, "_track_pi"):
+            status, data, _ = self.request("POST", "/v1/player/pi/commands", {
+                "action": "play", "itemId": item["id"], "expectedRevision": self.state.pi["revision"]})
+        self.assertEqual(status, 200)
+        sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list if c.args[0][0] == "set_property"}
+        return sets, json.loads(data)["player"]
+
+    def test_each_screen_keeps_its_own_settings_and_playback_uses_them(self):
+        self.connector("HDMI-A-1", "connected")
+        self.connector("HDMI-A-2", "disconnected")
+        status, data, _ = self.request("GET", "/v1/displays")
+        listed = json.loads(data)
+        monitor = listed["displays"][0]
+        self.assertEqual((status, len(listed["displays"]), listed["current"]), (200, 1, monitor["id"]))
+        self.assertEqual((monitor["id"], monitor["name"], monitor["port"], monitor["size"], monitor["connected"]),
+                         ("port-HDMI-A-1-1920x1080", "HDMI0 screen", "HDMI0", "1920 by 1080", True))
+        self.assertEqual(monitor["settings"], {"rotate": 0, "startVolume": 0, "sound": "display"})
+        self.assertIsInstance(monitor["lastSeen"], int)
+        sets, player = self.play_and_capture()
+        self.assertEqual((sets["volume"], sets["video-rotate"], player["volume"]), (0, 0, 0))
+        route = "/v1/displays/" + monitor["id"]
+        for body, field in (({"colour": "red"}, "colour"),
+                            ({"settings": {"rotate": 45}}, "settings.rotate"),
+                            ({"settings": {"startVolume": 101}}, "settings.startVolume"),
+                            ({"settings": {"startVolume": True}}, "settings.startVolume"),
+                            ({"settings": {"sound": "hdmi"}}, "settings.sound"),
+                            ({"settings": {"brightness": 3}}, "settings.brightness"),
+                            ({"name": ""}, "name")):
+            status, data, _ = self.request("PUT", route, body)
+            error = json.loads(data)
+            self.assertEqual((status, error["code"], error["field"]), (400, "DISPLAY_INVALID", field))
+        status, data, _ = self.request("PUT", "/v1/displays/port-unknown", {"name": "X"})
+        self.assertEqual((status, json.loads(data)["code"]), (404, "DISPLAY_NOT_FOUND"))
+        status, data, _ = self.request("PUT", route, {"name": "Desk monitor",
+                                                      "settings": {"rotate": 180, "startVolume": 35}})
+        saved = json.loads(data)["display"]
+        self.assertEqual((status, saved["name"], saved["settings"]),
+                         (200, "Desk monitor", {"rotate": 180, "startVolume": 35, "sound": "display"}))
+        status, data, _ = self.request("PUT", route, {"settings": {"sound": "headphones"}})
+        self.assertEqual(json.loads(data)["display"]["settings"],
+                         {"rotate": 180, "startVolume": 35, "sound": "headphones"})
+        sets, player = self.play_and_capture()
+        self.assertEqual((sets["volume"], sets["video-rotate"], player["volume"], player["rotation"]),
+                         (35, 180, 35, 180))
+        # The Pi moves to a projector with an EDID on the other port.
+        self.connector("HDMI-A-1", "disconnected")
+        self.connector("HDMI-A-2", "connected", self.edid("PROJ X1", "ABC123"), modes="")
+        status, data, _ = self.request("GET", "/v1/displays")
+        listed = json.loads(data)
+        by_id = {d["id"]: d for d in listed["displays"]}
+        self.assertEqual(listed["current"], "edid-ACR-1234-ABC123")
+        projector = by_id["edid-ACR-1234-ABC123"]
+        self.assertEqual((projector["name"], projector["port"], projector["size"], projector["connected"]),
+                         ("PROJ X1", "HDMI1", "1280 by 800", True))
+        self.assertEqual((by_id[monitor["id"]]["connected"], by_id[monitor["id"]]["name"],
+                          by_id[monitor["id"]]["settings"]["rotate"]), (False, "Desk monitor", 180))
+        sets, _ = self.play_and_capture()
+        self.assertEqual((sets["volume"], sets["video-rotate"]), (0, 0))
+        self.connector("HDMI-A-1", "connected")
+        listed = json.loads(self.request("GET", "/v1/displays")[1])
+        self.assertEqual((listed["current"], len(listed["displays"])), (monitor["id"], 2))
+        self.assertTrue(all(d["connected"] for d in listed["displays"]))
+        status, data, _ = self.request("GET", "/v1/diagnostics")
+        self.assertEqual(set(json.loads(data)), {"observedAt", "drives", "piPlayer", "phonePlayer",
+                                                  "power", "displays", "playerErrors"})
+
     def test_bootstrap_link_is_secret_scoped_and_expires(self):
         marker = Path(self.tmp.name) / "app-bootstrap-token"
         marker.write_text("s" * 40)

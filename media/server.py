@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from . import displays
 from .camera import Camera
 from .library import Drive, Library, MediaError
 
@@ -71,6 +72,7 @@ class State:
         self.camera = camera
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
+        self.drm_root = Path("/sys/class/drm")
         self.player_process = None
         self.lock = threading.RLock()
         self.play_lock = threading.Lock()
@@ -117,6 +119,10 @@ class State:
                 id TEXT PRIMARY KEY, note_id TEXT NOT NULL, name TEXT NOT NULL,
                 mime TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)""")
             db.execute("CREATE INDEX IF NOT EXISTS note_files_note ON note_files(note_id, created_at)")
+            db.execute("""CREATE TABLE IF NOT EXISTS displays (
+                id TEXT PRIMARY KEY, detected_name TEXT NOT NULL, custom_name TEXT,
+                port TEXT NOT NULL, size TEXT, last_seen INTEGER,
+                settings TEXT NOT NULL DEFAULT '{}')""")
 
     def _db(self):
         return sqlite3.connect(self.database, timeout=5)
@@ -390,6 +396,58 @@ class State:
             raise MediaError("IMAGE_NOT_FOUND", "This note image is unavailable", 404)
         return row[0]
 
+    def _observe_displays(self) -> list[str]:
+        """Remember every connected screen and return their ids, the one in use first."""
+        seen = displays.scan(self.drm_root)
+        now = int(time.time() * 1000)
+        with self._db() as db:
+            for found in seen:
+                db.execute("""INSERT INTO displays(id,detected_name,port,size,last_seen) VALUES(?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET detected_name=excluded.detected_name,
+                    port=excluded.port, size=coalesce(excluded.size,size), last_seen=excluded.last_seen""",
+                           (found["id"], found["name"], found["port"], found["size"], now))
+        return [found["id"] for found in seen]
+
+    @staticmethod
+    def _display_row(row: tuple, connected: list[str]) -> dict:
+        return {"id": row[0], "name": row[2] or row[1], "connected": row[0] in connected,
+                "port": row[3], "size": row[4], "lastSeen": row[5],
+                "settings": {**displays.DEFAULT_SETTINGS, **json.loads(row[6])}}
+
+    def displays_list(self) -> dict:
+        connected = self._observe_displays()
+        with self._db() as db:
+            rows = db.execute("SELECT id,detected_name,custom_name,port,size,last_seen,settings FROM displays "
+                              "ORDER BY last_seen DESC,id LIMIT 100").fetchall()
+        return {"displays": [self._display_row(row, connected) for row in rows],
+                "current": connected[0] if connected else None}
+
+    def display_update(self, display_id: str, body: dict) -> dict:
+        name, settings = displays.validate_update(body)
+        connected = self._observe_displays()
+        with self._db() as db:
+            row = db.execute("SELECT settings FROM displays WHERE id=?", (display_id,)).fetchone()
+            if row is None:
+                raise MediaError("DISPLAY_NOT_FOUND", "The Pi has not seen this screen", 404)
+            merged = {**json.loads(row[0]), **settings}
+            db.execute("UPDATE displays SET settings=?, custom_name=coalesce(?,custom_name) WHERE id=?",
+                       (json.dumps(merged), name, display_id))
+            row = db.execute("SELECT id,detected_name,custom_name,port,size,last_seen,settings FROM displays "
+                             "WHERE id=?", (display_id,)).fetchone()
+        return self._display_row(row, connected)
+
+    def display_settings_now(self) -> dict:
+        """How to drive the screen that is plugged in now; today's defaults for a new one."""
+        try:
+            connected = self._observe_displays()
+        except (OSError, sqlite3.Error):
+            connected = []
+        if not connected:
+            return dict(displays.DEFAULT_SETTINGS)
+        with self._db() as db:
+            row = db.execute("SELECT settings FROM displays WHERE id=?", (connected[0],)).fetchone()
+        return {**displays.DEFAULT_SETTINGS, **json.loads(row[0] if row else "{}")}
+
     def history(self) -> list[dict]:
         with self._db() as db:
             rows = db.execute("SELECT item_id,target,session_id,generation,sequence,position_ms,completed,updated_at,name,drive_label FROM progress ORDER BY updated_at DESC LIMIT 200").fetchall()
@@ -643,13 +701,14 @@ class State:
                     drive, relative, _ = self.library.decode(item_id)
                     path = str(drive.root / relative)
                     name = meta["name"]
+                settings = self.display_settings_now()
                 self._start_player()
-                self._mpv(["set_property", "volume", 0])
+                self._mpv(["set_property", "volume", settings["startVolume"]])
                 self._mpv(["set_property", "pause", False])
-                self._mpv(["set_property", "video-rotate", 0])
+                self._mpv(["set_property", "video-rotate", settings["rotate"]])
                 self._mpv(["set_property", "loop-file", "no"])
-                self.pi["volume"] = 0
-                self.pi["rotation"] = 0
+                self.pi["volume"] = settings["startVolume"]
+                self.pi["rotation"] = settings["rotate"]
                 self.pi["loop"] = False
                 self._mpv(["loadfile", path, "replace"])
                 self.pi.update(itemId=item_id, state="loading", positionMs=0,
@@ -967,7 +1026,10 @@ def handler_for(state: State, token: str):
                 self.wfile.write(data)
 
         def _error(self, error: MediaError):
-            self._json(error.status, {"code": error.code, "message": str(error), "retryable": error.status >= 500})
+            payload = {"code": error.code, "message": str(error), "retryable": error.status >= 500}
+            if getattr(error, "field", None):
+                payload["field"] = error.field
+            self._json(error.status, payload)
 
         def _auth(self) -> bool:
             if secrets.compare_digest(self.headers.get("X-Csync-Token", ""), token):
@@ -1134,6 +1196,8 @@ def handler_for(state: State, token: str):
                     return self._json(200, diagnostics())
                 if path == "/v1/display/wallpaper":
                     return self._json(200, {"stored": state.wallpaper.is_file()})
+                if path == "/v1/displays":
+                    return self._json(200, state.displays_list())
                 if path == "/v1/app/apk":
                     return self._apk()
                 if path == "/v1/camera/status" and state.camera:
@@ -1208,6 +1272,9 @@ def handler_for(state: State, token: str):
                     return self._json(200, state.camera.stop_recording())
                 if path == "/v1/camera/record/clip" and state.camera:
                     return self._json(200, state.camera.record_clip(body.get("durationSeconds", 5)))
+            elif self.command == "PUT" and path.startswith("/v1/displays/"):
+                return self._json(200, {"display": state.display_update(
+                    path.removeprefix("/v1/displays/"), self._body(4096))})
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/pins/"):
                 pin_id = path.removeprefix("/v1/pins/")
                 body = self._body(8 * 1024)

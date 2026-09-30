@@ -30,10 +30,16 @@ def _media_file(path: Path) -> bool:
 
 
 class MediaError(Exception):
-    def __init__(self, code: str, message: str, status: int = 400):
+    """A failure the phone can show as a sentence, with a stable code to branch on.
+
+    `field` names the request field at fault when one input was out of range.
+    """
+
+    def __init__(self, code: str, message: str, status: int = 400, field: str | None = None):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.field = field
 
 
 @dataclass(frozen=True)
