@@ -27,6 +27,9 @@ from .library import Drive, Library, MediaError
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
 SHOW_IMAGE_CODECS = {"mjpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
+DOCUMENT_LIMIT = 25 * 1024 * 1024
+# A document is drawn a page at a time; this many pages is plenty to read on a wall.
+DOCUMENT_PAGES = 40
 
 
 class State:
@@ -691,6 +694,7 @@ class State:
         if not kind:
             return
         self.pi.pop("count", None)
+        self.pi.pop("page", None)
         self.pi.pop("paused", None)
         # The name belonged to what was shown; an idle screen has none.
         self.pi.pop("name", None)
@@ -791,12 +795,14 @@ class State:
                    "res_x": width, "res_y": height})
 
     def _show_on_screen(self, paths: list[str], kind: str, name: str, seconds: int | None = None,
-                        text: tuple[str | None, str] | None = None, live: bool = False) -> dict:
-        """Put a picture, text or slideshow on the Pi screen in place of whatever was there.
+                        text: tuple[str | None, str] | None = None, live: bool = False,
+                        paged: bool = False) -> dict:
+        """Put a picture, text, slideshow or document on the Pi screen in place of whatever was there.
 
         Playback that was running is saved to history and ended, like a Stop. A
         slideshow is an mpv playlist that loops, with each picture held for
-        `seconds`; a single picture or text is held until something replaces it.
+        `seconds`; a document is a playlist of pages held until turned; a single
+        picture or text is held until something replaces it.
         """
         with self.lock:
             if self.pi.get("itemId"):
@@ -835,8 +841,10 @@ class State:
                 sent = False
             if sent:
                 self.pi.update(state="showing", kind=kind, name=name, rotation=rotate, paused=False)
-                if seconds:
+                if seconds or paged:
                     self.pi["count"] = len(paths)
+                if paged:
+                    self.pi["page"] = 1
             else:
                 self.display_text = None
                 self.pi.update(state="unavailable", error="The Pi screen did not take the picture or text")
@@ -870,6 +878,45 @@ class State:
                 if old != target:
                     old.unlink(missing_ok=True)
             return self._show_on_screen([str(target)], "image", label)
+
+    def show_document(self, document: bytes, name: str = "") -> dict:
+        """Show a PDF on the Pi screen one page at a time, starting at the first.
+
+        The pages are drawn as pictures on the Pi with `pdftoppm`, at the screen's own
+        size, and turned with the player's `next` and `previous` commands. A Pi without
+        poppler-utils says so rather than showing nothing.
+        """
+        if len(document) < 100 or len(document) > DOCUMENT_LIMIT or not document.startswith(b"%PDF"):
+            raise MediaError("DOCUMENT_INVALID", "Choose a PDF under 25 MB", 400)
+        if shutil.which("pdftoppm") is None:
+            raise MediaError("DOCUMENT_UNAVAILABLE",
+                             "This Pi cannot draw documents yet; install poppler-utils on it", 501)
+        label = re.sub(r"[\x00-\x1f\x7f]", "", name or "").strip()[:120] or "Document"
+        with self.lock:
+            self._start_player()
+            width, height = self._screen_size()
+            folder = self.database.parent / "display-document"
+            fresh = folder.with_name(f"display-document-{secrets.token_hex(6)}.render")
+            fresh.mkdir(mode=0o700)
+            source = fresh / "source.pdf"
+            source.write_bytes(document)
+            try:
+                subprocess.run(["pdftoppm", "-png", "-f", "1", "-l", str(DOCUMENT_PAGES),
+                                "-scale-to", str(max(width, height)), str(source), str(fresh / "page")],
+                               capture_output=True, timeout=60, check=True)
+            except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                shutil.rmtree(fresh, ignore_errors=True)
+                raise MediaError("DOCUMENT_INVALID", "This PDF could not be drawn", 400)
+            source.unlink(missing_ok=True)
+            # pdftoppm numbers pages with leading zeros, so a name sort is a page sort.
+            pages = sorted(fresh.glob("page-*.png"))
+            if not pages:
+                shutil.rmtree(fresh, ignore_errors=True)
+                raise MediaError("DOCUMENT_INVALID", "This PDF has no pages to show", 400)
+            shutil.rmtree(folder, ignore_errors=True)
+            os.replace(fresh, folder)
+            pages = [str(folder / page.name) for page in pages]
+            return self._show_on_screen(pages, "document", label, paged=True)
 
     def show_text(self, body: dict) -> dict:
         """Show text now, as large as will fit, over a plain black screen."""
@@ -1082,7 +1129,17 @@ class State:
             showing = self.pi["state"] == "showing"
             if showing and action in ("seek", "speed", "loop"):
                 raise MediaError("NOT_PLAYING", "The Pi screen is showing a picture or text; Stop ends it", 409)
-            if action in ("pause", "resume"):
+            if action in ("next", "previous"):
+                if not showing or self.pi.get("kind") != "document":
+                    raise MediaError("NOT_PAGED", "Only a document on the Pi screen has pages to turn", 409)
+                page, count = self.pi.get("page", 1), self.pi.get("count", 1)
+                if action == "next" and page < count:
+                    self._mpv(["playlist-next"])
+                    self.pi["page"] = page + 1
+                elif action == "previous" and page > 1:
+                    self._mpv(["playlist-prev"])
+                    self.pi["page"] = page - 1
+            elif action in ("pause", "resume"):
                 self._mpv(["set_property", "pause", action == "pause"])
                 # Pausing a slideshow holds the current photo; the screen is still showing.
                 if showing:
@@ -1611,9 +1668,19 @@ def handler_for(state: State, token: str):
                             raise MediaError("IMAGE_INVALID", "Choose an image under 10 MB", 400)
                         return self._json(200, state.show_image(self.rfile.read(length),
                                                                 query.get("name", [""])[0]))
+                    if content_type == "application/pdf":
+                        try:
+                            length = int(self.headers.get("Content-Length", "0"))
+                        except ValueError:
+                            length = 0
+                        if length < 100 or length > DOCUMENT_LIMIT:
+                            raise MediaError("DOCUMENT_INVALID", "Choose a PDF under 25 MB", 400)
+                        self.connection.settimeout(90)
+                        return self._json(200, state.show_document(self.rfile.read(length),
+                                                                   query.get("name", [""])[0]))
                     if content_type == "application/json":
                         return self._json(200, state.show_text(self._body(64 * 1024)))
-                    raise MediaError("DISPLAY_INVALID", "Send a picture, or text as JSON", 415)
+                    raise MediaError("DISPLAY_INVALID", "Send a picture, a PDF, or text as JSON", 415)
                 if path == "/v1/display/camera":
                     return self._json(200, state.show_camera())
                 body = self._body()

@@ -6,6 +6,7 @@ import queue
 import sqlite3
 import socket
 import stat
+import subprocess
 import time
 import tempfile
 import threading
@@ -587,6 +588,51 @@ class MediaServiceTest(unittest.TestCase):
             self.assertNotIn("name", player)
             self.assertEqual(len(self.overlays(mpv, "none")), 1)
         self.assertEqual(self.state.wallpaper.read_bytes(), b"cover")
+
+    def test_document_is_drawn_page_by_page_and_turned_from_the_phone(self):
+        pdf = b"%PDF-1.4 " + b"p" * 200
+
+        def draw(command, **kwargs):
+            # A stand-in pdftoppm: three pages, numbered the way the real one numbers them.
+            self.assertEqual((command[0], command[-3]), ("pdftoppm", "1920"))
+            for number in (1, 2, 3):
+                Path(f"{command[-1]}-{number}.png").write_bytes(b"\x89PNG" + bytes([number]))
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()) as mpv, \
+                patch("media.server.shutil.which", return_value="/usr/bin/pdftoppm"), \
+                patch("media.server.subprocess.run", side_effect=draw):
+            status, result = self.upload("/v1/display/show?name=Notes.pdf", pdf, {"Content-Type": "application/pdf"})
+            self.assertEqual((status, result["sentToDisplay"]), (200, True))
+            player = result["player"]
+            self.assertEqual({k: player[k] for k in ("state", "kind", "name", "count", "page")},
+                             {"state": "showing", "kind": "document", "name": "Notes.pdf", "count": 3, "page": 1})
+            folder = Path(self.tmp.name) / "display-document"
+            self.assertEqual(sorted(p.name for p in folder.iterdir()), ["page-1.png", "page-2.png", "page-3.png"])
+            mpv.assert_any_call(["loadfile", str(folder / "page-1.png"), "replace"])
+            mpv.assert_any_call(["loadfile", str(folder / "page-3.png"), "append"])
+            mpv.assert_any_call(["set_property", "image-display-duration", "inf"])
+            mpv.assert_any_call(["set_property", "loop-playlist", "no"])
+            for action, page in (("next", 2), ("next", 3), ("next", 3), ("previous", 2)):
+                status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                               {"action": action, "expectedRevision": self.state.pi["revision"]})
+                self.assertEqual((status, json.loads(data)["player"]["page"]), (200, page))
+            turns = [c.args[0][0] for c in mpv.call_args_list if c.args[0][0] in ("playlist-next", "playlist-prev")]
+            self.assertEqual(turns, ["playlist-next", "playlist-next", "playlist-prev"])
+            status, result = self.upload("/v1/display/show", b"not a pdf" * 20, {"Content-Type": "application/pdf"})
+            self.assertEqual((status, result["code"]), (400, "DOCUMENT_INVALID"))
+            with patch.object(self.state, "show_wallpaper", return_value=True):
+                status, data, _ = self.request("POST", "/v1/player/pi/immediate", {"action": "stop"})
+            self.assertNotIn("page", json.loads(data)["player"])
+            status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                           {"action": "next", "expectedRevision": self.state.pi["revision"]})
+            self.assertEqual((status, json.loads(data)["code"]), (409, "NOT_PAGED"))
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()), \
+                patch("media.server.shutil.which", return_value=None):
+            status, result = self.upload("/v1/display/show", pdf, {"Content-Type": "application/pdf"})
+            self.assertEqual((status, result["code"]), (501, "DOCUMENT_UNAVAILABLE"))
 
     def test_text_is_laid_out_large_and_cut_only_after_a_whole_word(self):
         from media import screen
