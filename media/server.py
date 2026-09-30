@@ -169,8 +169,12 @@ class State:
                     "ORDER BY updated_at DESC,id LIMIT 500", (query, query)).fetchall()
             else:
                 rows = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes ORDER BY updated_at DESC,id LIMIT 500").fetchall()
-        return [{key: value for key, value in self._note_row(row).items() if key != "body"}
-                for row in rows]
+            # How many pictures and files each note keeps, so a list can say so without opening it.
+            kept = dict(db.execute(
+                "SELECT note_id,count(*) FROM (SELECT note_id FROM note_images UNION ALL "
+                "SELECT note_id FROM note_files) GROUP BY note_id").fetchall())
+        return [{**{key: value for key, value in self._note_row(row).items() if key != "body"},
+                 "items": kept.get(row[0], 0)} for row in rows]
 
     def note_get(self, note_id: str) -> dict:
         with self._db() as db:
