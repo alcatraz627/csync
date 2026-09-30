@@ -176,6 +176,17 @@ this phone, Share with another app. Those choices move between places:
 | Save as a pin | Pin edit |
 | Share with another app | Android's share sheet |
 
+### The quick rail: a jump from any page
+
+The two floating buttons at the top corners sit on every page. The right one
+flips the theme in place. The left one, bar 1, holds the places and actions
+picked in Settings › Appearance › Quick rail; a tap runs the first, a drag opens
+the chain. A rail item is a jump, the same move as a bar tap: it opens the place
+as if from the bar, and Back then walks that place's own path, never back to the
+page the rail was pressed on. A jump never leaves a second copy of Media, Notes
+or Search underneath; the one already open is restarted at the new spot. Actions
+that need no page (stop the Pi screen, show the camera) act in place.
+
 ### In from outside the app
 
 | Entry | Lands on |
@@ -197,7 +208,7 @@ this phone, Share with another app. Those choices move between places:
 | chat reply notification | Conversation (reply from the notification stays there) |
 | playback notification | This phone page |
 | screen share notification Stop | ends sharing, no page |
-| search result | Media item sheet, Conversation, Received item sheet, Device sheet |
+| search result | Media item sheet, Conversation, Received scrolled to the file, Device sheet; each a visit, Back returns to the results |
 
 ### Out to the Pi screen, and back
 
