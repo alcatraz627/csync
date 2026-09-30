@@ -56,7 +56,7 @@ func builtinProviders() []providerInfo {
 		},
 		{
 			ID: "openai", Label: "Codex", KeyFile: "openai.key",
-			Models:  []string{"gpt-5-codex", "gpt-5", "gpt-5-mini"},
+			Models:  chatGPTModels,
 			Efforts: []string{"low", "medium", "high"},
 		},
 	}
@@ -86,6 +86,11 @@ func providersForApp() []providerInfo {
 			p.Reason = p.Label + " is not built into this Pi's assistant"
 			continue
 		}
+		// A ChatGPT sign-in comes before an API key: it uses the plan the owner already pays for.
+		if p.ID == "openai" && chatGPTSignedIn() {
+			p.ChatSupported, p.Models = true, chatGPTModels
+			continue
+		}
 		key, err := readKeyFile(filepath.Join(configDir(), p.KeyFile))
 		if err != nil {
 			p.Reason = "No " + p.Label + " key on this Pi"
@@ -112,7 +117,7 @@ func chatProviderSupported(id string) bool {
 	for _, p := range loadProviders() {
 		if p.ID == id {
 			_, implemented := chatRunners[id]
-			_, err := readKeyFile(filepath.Join(configDir(), p.KeyFile))
+			_, err := providerKey(id)
 			return implemented && err == nil
 		}
 	}
@@ -210,6 +215,9 @@ func saveAssistConfig(c assistConfig) error {
 
 // providerKey reads the API key for a provider from its registered key file.
 func providerKey(id string) (string, error) {
+	if id == "openai" && chatGPTSignedIn() {
+		return chatGPTKey, nil
+	}
 	for _, p := range loadProviders() {
 		if p.ID == id {
 			return readKeyFile(filepath.Join(configDir(), p.KeyFile))

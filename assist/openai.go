@@ -55,6 +55,9 @@ type oaResponse struct {
 var oaReasoningModel = regexp.MustCompile(`^(gpt-5|o[0-9]|codex)`)
 
 func runOpenAI(key, model, effort, system string, history []gContent, emit func(turn)) ([]turn, error) {
+	if key == chatGPTKey {
+		return runChatGPT(model, effort, system, history, emit)
+	}
 	req := oaRequest{Model: model, Instructions: system, Input: openAIInput(history), Tools: openAITools()}
 	if oaReasoningModel.MatchString(model) {
 		req.Reasoning = &oaReasoning{Effort: openAIEffort(effort)}
@@ -172,7 +175,7 @@ func openAIInput(history []gContent) []any {
 		if assistant {
 			role = "assistant"
 		}
-		out = append(out, map[string]any{"role": role, "content": content})
+		out = append(out, map[string]any{"type": "message", "role": role, "content": content})
 	}
 	return out
 }
