@@ -21,11 +21,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import displays
+from . import displays, screen
 from .camera import Camera
 from .library import Drive, Library, MediaError
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
+SHOW_IMAGE_CODECS = {"mjpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
 
 
 class State:
@@ -73,6 +74,10 @@ class State:
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
         self.drm_root = Path("/sys/class/drm")
+        # The title and text on screen and the OSD size they were laid out for,
+        # kept so a rotation can redraw them.
+        self.display_text: tuple[str | None, str] | None = None
+        self.display_size = (1920, 1080)
         self.player_process = None
         self.lock = threading.RLock()
         self.play_lock = threading.Lock()
@@ -504,7 +509,8 @@ class State:
                  name, drive_label))
         return {"saved": True, "positionMs": position}
 
-    def _mpv(self, command: list) -> dict:
+    def _mpv(self, command: list | dict) -> dict:
+        # A dict sends mpv's named-argument form, which osd-overlay is documented with.
         if not self.mpv_socket or not self.mpv_socket.exists():
             raise MediaError("PLAYER_UNAVAILABLE", "Pi player is not running", 503)
         try:
@@ -589,6 +595,7 @@ class State:
                     self._save_pi_progress(observed, observed["state"] == "finished")
                 except MediaError:
                     pass
+            self._clear_showing()
             self.pi.update(itemId=None, state="idle", positionMs=0,
                            rotation=0, loop=False)
             self.pi.pop("error", None)
@@ -600,9 +607,162 @@ class State:
                 displayed = False
         return {"stored": True, "sentToDisplay": displayed}
 
+    def _clear_showing(self):
+        """Take down a picture, text or slideshow before anything else uses the screen."""
+        kind = self.pi.pop("kind", None)
+        if not kind:
+            return
+        self.pi.pop("count", None)
+        self.pi.pop("paused", None)
+        self.display_text = None
+        try:
+            if kind == "text":
+                self._mpv({"name": "osd-overlay", "id": screen.TEXT_OVERLAY_ID, "format": "none", "data": ""})
+            elif kind == "slideshow":
+                self._mpv(["set_property", "loop-playlist", "no"])
+        except MediaError:
+            pass
+
+    def _screen_size(self) -> tuple[int, int]:
+        """The size mpv is drawing at, else the connected mode, else full HD."""
+        try:
+            width = self._mpv(["get_property", "osd-width"]).get("data")
+            height = self._mpv(["get_property", "osd-height"]).get("data")
+            if type(width) is int and type(height) is int and width > 0 and height > 0:
+                return width, height
+        except MediaError:
+            pass
+        for found in displays.scan(self.drm_root):
+            if found["pixels"]:
+                return found["pixels"]
+        return 1920, 1080
+
+    def _draw_text(self, rotate: int):
+        width, height = self.display_size
+        title, text = self.display_text
+        canvas = (height, width) if rotate in (90, 270) else (width, height)
+        laid_out = screen.layout(title, text, *canvas)
+        self._mpv({"name": "osd-overlay", "id": screen.TEXT_OVERLAY_ID, "format": "ass-events",
+                   "data": screen.ass_event(laid_out, width, height, rotate),
+                   "res_x": width, "res_y": height})
+
+    def _show_on_screen(self, paths: list[str], kind: str, name: str, seconds: int | None = None,
+                        text: tuple[str | None, str] | None = None) -> dict:
+        """Put a picture, text or slideshow on the Pi screen in place of whatever was there.
+
+        Playback that was running is saved to history and ended, like a Stop. A
+        slideshow is an mpv playlist that loops, with each picture held for
+        `seconds`; a single picture or text is held until something replaces it.
+        """
+        with self.lock:
+            if self.pi.get("itemId"):
+                try:
+                    observed = self.pi_state()
+                    if observed["state"] != "loading":
+                        self._save_pi_progress(observed, observed["state"] == "finished")
+                except MediaError:
+                    pass
+            self._clear_showing()
+            self.pi.update(itemId=None, positionMs=0, durationMs=None, loop=False)
+            self.pi.pop("error", None)
+            self.pi.pop("sourcePath", None)
+            self.pi_generation = time.time_ns()
+            rotate = self.display_settings_now()["rotate"]
+            try:
+                self._start_player()
+                size = self._screen_size() if text else None
+                self._mpv(["set_property", "pause", False])
+                self._mpv(["set_property", "loop-file", "no"])
+                self._mpv(["set_property", "video-rotate", rotate])
+                self._mpv(["set_property", "image-display-duration", seconds or "inf"])
+                self._mpv(["set_property", "loop-playlist", "inf" if seconds else "no"])
+                self._mpv(["loadfile", paths[0], "replace"])
+                for extra in paths[1:]:
+                    self._mpv(["loadfile", extra, "append"])
+                if text:
+                    self.display_text, self.display_size = text, size
+                    self._draw_text(rotate)
+                sent = True
+            except MediaError:
+                sent = False
+            if sent:
+                self.pi.update(state="showing", kind=kind, name=name, rotation=rotate, paused=False)
+                if seconds:
+                    self.pi["count"] = len(paths)
+            else:
+                self.display_text = None
+                self.pi.update(state="unavailable", error="The Pi screen did not take the picture or text")
+            self.pi["revision"] += 1
+            return {"shown": True, "sentToDisplay": sent, "player": self.pi_state()}
+
+    def show_image(self, image: bytes, name: str = "") -> dict:
+        """Show a picture now without changing the saved cover."""
+        if len(image) < 100 or len(image) > 10 * 1024 * 1024:
+            raise MediaError("IMAGE_INVALID", "Choose an image under 10 MB", 400)
+        try:
+            probe = subprocess.run([
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name,width,height", "-of", "json", "pipe:0",
+            ], input=image, capture_output=True, timeout=8, check=True)
+            stream = json.loads(probe.stdout)["streams"][0]
+            suffix = SHOW_IMAGE_CODECS[stream.get("codec_name")]
+            if not 1 <= stream.get("width", 0) <= 8192 or not 1 <= stream.get("height", 0) <= 8192:
+                raise ValueError("unsupported image")
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                ValueError, IndexError, KeyError, TypeError):
+            raise MediaError("IMAGE_INVALID", "Choose a JPEG, PNG, WebP, GIF or BMP image", 400)
+        label = re.sub(r"[\x00-\x1f\x7f]", "", name or "").strip()[:120] or "Picture"
+        with self.lock:
+            target = self.database.parent / f"display-show{suffix}"
+            candidate = target.with_name(f"display-show-{secrets.token_hex(6)}.upload")
+            candidate.write_bytes(image)
+            os.replace(candidate, target)
+            target.chmod(0o600)
+            for old in self.database.parent.glob("display-show.*"):
+                if old != target:
+                    old.unlink(missing_ok=True)
+            return self._show_on_screen([str(target)], "image", label)
+
+    def show_text(self, body: dict) -> dict:
+        """Show text now, as large as will fit, over a plain black screen."""
+        text, title = body.get("text"), body.get("title")
+        if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+            raise MediaError("TEXT_INVALID", "Send up to 4000 characters of text", 400, "text")
+        if title is not None and (not isinstance(title, str) or len(title) > 200):
+            raise MediaError("TEXT_INVALID", "Keep the title under 200 characters", 400, "title")
+        text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text.replace("\t", " ").replace("\r\n", "\n"))
+        title = re.sub(r"[\x00-\x1f\x7f]", " ", title).strip() if title else ""
+        blank = self.database.parent / "display-blank.png"
+        if not blank.is_file():
+            blank.write_bytes(screen.blank_png())
+        return self._show_on_screen([str(blank)], "text", screen.short_name(title, text),
+                                    text=(title or None, text))
+
+    def slideshow(self, body: dict) -> dict:
+        """Loop the pictures directly inside one drive folder until stopped."""
+        drive_id, relative, seconds = body.get("driveId"), body.get("path", ""), body.get("seconds", 8)
+        if not isinstance(drive_id, str) or not drive_id:
+            raise MediaError("SLIDESHOW_INVALID", "Choose a drive", 400, "driveId")
+        if not isinstance(relative, str) or len(relative) > 4096:
+            raise MediaError("SLIDESHOW_INVALID", "Choose a folder on the drive", 400, "path")
+        if type(seconds) is not int or not 3 <= seconds <= 60:
+            raise MediaError("SLIDESHOW_INVALID", "Show each photo for 3 to 60 seconds", 400, "seconds")
+        name, images = self.library.folder_images(drive_id, relative)
+        if not images:
+            raise MediaError("SLIDESHOW_EMPTY", "This folder has no photos to show", 400)
+        return self._show_on_screen([str(p) for p in images], "slideshow", name, seconds=seconds)
+
     def pi_state(self) -> dict:
         with self.lock:
             state = dict(self.pi)
+            if state["state"] == "showing":
+                # Nothing on screen has a position to read; only a vanished player changes it.
+                if not self.mpv_socket or not self.mpv_socket.exists():
+                    self._clear_showing()
+                    self.pi.update(state="unavailable", error="Player control socket disappeared")
+                    self.pi["revision"] += 1
+                    return dict(self.pi)
+                return state
             if state["itemId"] is None:
                 return state
             if state["state"] == "loading":
@@ -702,6 +862,7 @@ class State:
                     path = str(drive.root / relative)
                     name = meta["name"]
                 settings = self.display_settings_now()
+                self._clear_showing()
                 self._start_player()
                 self._mpv(["set_property", "volume", settings["startVolume"]])
                 self._mpv(["set_property", "pause", False])
@@ -769,13 +930,21 @@ class State:
         with self.lock:
             if body.get("expectedRevision") != self.pi["revision"]:
                 raise MediaError("STATE_CHANGED", "Refresh player state and retry", 409)
+            showing = self.pi["state"] == "showing"
+            if showing and action in ("seek", "speed", "loop"):
+                raise MediaError("NOT_PLAYING", "The Pi screen is showing a picture or text; Stop ends it", 409)
             if action in ("pause", "resume"):
                 self._mpv(["set_property", "pause", action == "pause"])
-                self.pi["state"] = "paused" if action == "pause" else "playing"
+                # Pausing a slideshow holds the current photo; the screen is still showing.
+                if showing:
+                    self.pi["paused"] = action == "pause"
+                else:
+                    self.pi["state"] = "paused" if action == "pause" else "playing"
             elif action == "stop":
                 state = self.pi_state()
                 if state["state"] != "loading":
                     self._save_pi_progress(state, state["state"] == "finished")
+                self._clear_showing()
                 self._mpv(["stop"])
                 try:
                     self.show_wallpaper()
@@ -802,6 +971,8 @@ class State:
                     raise MediaError("COMMAND_INVALID", "Choose 0, 90, 180, or 270 degrees")
                 self._mpv(["set_property", "video-rotate", value])
                 self.pi["rotation"] = value
+                if showing and self.pi.get("kind") == "text" and self.display_text:
+                    self._draw_text(value)
             elif action == "loop":
                 value = body.get("value")
                 if type(value) is not bool:
@@ -826,6 +997,7 @@ class State:
                             self._save_pi_progress(state, state["state"] == "finished")
                     except MediaError:
                         pass
+                self._clear_showing()
                 self._mpv(["stop"])
                 try:
                     self.show_wallpaper()
@@ -837,7 +1009,10 @@ class State:
                 self.pi.pop("sourcePath", None)
             elif action == "pause":
                 self._mpv(["set_property", "pause", True])
-                self.pi["state"] = "paused"
+                if self.pi["state"] == "showing":
+                    self.pi["paused"] = True
+                else:
+                    self.pi["state"] = "paused"
             else:
                 value = 0 if action == "mute" else body.get("value")
                 if not isinstance(value, (int, float)) or not 0 <= value <= 100:
@@ -1247,7 +1422,23 @@ def handler_for(state: State, token: str):
                     if length < 100 or length > 10 * 1024 * 1024:
                         raise MediaError("IMAGE_INVALID", "Choose a JPEG image under 10 MB", 400)
                     return self._json(200, state.set_wallpaper(self.rfile.read(length)))
+                if path == "/v1/display/show":
+                    content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                    if content_type.startswith("image/"):
+                        try:
+                            length = int(self.headers.get("Content-Length", "0"))
+                        except ValueError:
+                            length = 0
+                        if length < 100 or length > 10 * 1024 * 1024:
+                            raise MediaError("IMAGE_INVALID", "Choose an image under 10 MB", 400)
+                        return self._json(200, state.show_image(self.rfile.read(length),
+                                                                query.get("name", [""])[0]))
+                    if content_type == "application/json":
+                        return self._json(200, state.show_text(self._body(64 * 1024)))
+                    raise MediaError("DISPLAY_INVALID", "Send a picture, or text as JSON", 415)
                 body = self._body()
+                if path == "/v1/display/slideshow":
+                    return self._json(200, state.slideshow(body))
                 if path == "/v1/cast/youtube":
                     return self._json(200, state.cast_youtube(body.get("url", "")))
                 if path == "/v1/progress":

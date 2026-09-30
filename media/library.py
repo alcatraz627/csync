@@ -23,6 +23,10 @@ MEDIA_SUFFIXES = frozenset({
     ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus", ".wma",
 })
 VIDEO_SUFFIXES = frozenset({".mp4", ".m4v", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".ts", ".m2ts", ".mpg", ".mpeg"})
+# Still pictures mpv can decode with the Pi's stock ffmpeg. HEIC is left out
+# because Debian's ffmpeg cannot read it.
+IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"})
+SLIDESHOW_LIMIT = 1000
 
 
 def _media_file(path: Path) -> bool:
@@ -255,6 +259,23 @@ class Library:
             raise MediaError("MOUNT_UNREADABLE", "This folder cannot be read", 403)
         return {"items": page, "nextOffset": offset + limit if offset + limit < len(entries) else None,
                 "total": len(entries)}
+
+    def folder_images(self, drive_id: str, relative: str = "") -> tuple[str, list[Path]]:
+        """The folder's name and the pictures directly inside it, in browser order.
+
+        The folder resolves exactly as browsing resolves it, links and escapes included.
+        """
+        drive = self._drive(drive_id)
+        folder = self._path(drive, relative)
+        if not folder.is_dir():
+            raise MediaError("NOT_A_FOLDER", "Select a folder", 400)
+        try:
+            images = [p for p in folder.iterdir() if not p.name.startswith(".") and
+                      not p.is_symlink() and p.is_file() and p.suffix.casefold() in IMAGE_SUFFIXES]
+        except PermissionError:
+            raise MediaError("MOUNT_UNREADABLE", "This folder cannot be read", 403)
+        images.sort(key=lambda p: (p.name.casefold(), p.name))
+        return folder.name if relative else drive.label, images[:SLIDESHOW_LIMIT]
 
     def search(self, query: str, limit: int = 100) -> dict:
         query = query.strip().casefold()

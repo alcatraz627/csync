@@ -432,6 +432,158 @@ class MediaServiceTest(unittest.TestCase):
         self.assertEqual(set(json.loads(data)), {"observedAt", "drives", "piPlayer", "phonePlayer",
                                                   "power", "displays", "playerErrors"})
 
+    def fake_screen(self):
+        """A stand-in mpv that accepts every command and reports a full HD OSD."""
+        self.state.mpv_socket = Path(self.tmp.name) / "mpv.sock"
+        self.state.mpv_socket.touch()
+        def reply(command):
+            if isinstance(command, list) and command[0] == "get_property":
+                return {"data": {"osd-width": 1920, "osd-height": 1080}.get(command[1])}
+            return {"error": "success"}
+        return reply
+
+    @staticmethod
+    def overlays(mpv, format_name="ass-events"):
+        return [c.args[0] for c in mpv.call_args_list
+                if isinstance(c.args[0], dict) and c.args[0]["name"] == "osd-overlay" and
+                c.args[0]["format"] == format_name]
+
+    def test_show_picture_and_text_on_screen_then_stop_returns_to_cover(self):
+        self.state.wallpaper.write_bytes(b"cover")
+        picture = b"\x89PNG\r\n\x1a\n" + b"p" * 200
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()) as mpv, \
+                patch("media.server.subprocess.run") as probe:
+            probe.return_value.stdout = b'{"streams":[{"codec_name":"png","width":640,"height":480}]}'
+            status, result = self.upload("/v1/display/show?name=Sunset.png", picture, {"Content-Type": "image/png"})
+            self.assertEqual((status, result["shown"], result["sentToDisplay"]), (200, True, True))
+            self.assertEqual({k: result["player"][k] for k in ("state", "kind", "name", "itemId")},
+                             {"state": "showing", "kind": "image", "name": "Sunset.png", "itemId": None})
+            shown = Path(self.tmp.name) / "display-show.png"
+            self.assertEqual(shown.read_bytes(), picture)
+            self.assertEqual(self.state.wallpaper.read_bytes(), b"cover")
+            mpv.assert_any_call(["loadfile", str(shown), "replace"])
+            mpv.assert_any_call(["set_property", "image-display-duration", "inf"])
+            self.assertEqual(json.loads(self.request("GET", "/v1/player/pi")[1])["state"], "showing")
+            probe.return_value.stdout = b'{"streams":[{"codec_name":"h264","width":640,"height":480}]}'
+            status, result = self.upload("/v1/display/show", picture, {"Content-Type": "image/png"})
+            self.assertEqual((status, result["code"]), (400, "IMAGE_INVALID"))
+
+            status, data, _ = self.request("POST", "/v1/display/show",
+                                           {"title": "Dinner", "text": "Pasta at {7}, bring \\N wine"})
+            result = json.loads(data)
+            self.assertEqual((status, result["player"]["kind"], result["player"]["name"]), (200, "text", "Dinner"))
+            blank = Path(self.tmp.name) / "display-blank.png"
+            self.assertTrue(blank.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+            mpv.assert_any_call(["loadfile", str(blank), "replace"])
+            overlay = self.overlays(mpv)
+            self.assertEqual(len(overlay), 1)
+            self.assertEqual((overlay[0]["id"], overlay[0]["res_x"], overlay[0]["res_y"]), (7, 1920, 1080))
+            self.assertIn("{\\b1}Dinner{\\b0}", overlay[0]["data"])
+            self.assertIn("\\{7}", overlay[0]["data"])
+            self.assertIn("\\⁠N", overlay[0]["data"])
+            self.assertNotIn("\\N wine", overlay[0]["data"])
+
+            revision = self.state.pi["revision"]
+            status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                           {"action": "seek", "positionMs": 0, "expectedRevision": revision})
+            self.assertEqual((status, json.loads(data)["code"]), (409, "NOT_PLAYING"))
+            status, data, _ = self.request("POST", "/v1/player/pi/immediate", {"action": "pause"})
+            player = json.loads(data)["player"]
+            self.assertEqual((player["state"], player["paused"]), ("showing", True))
+            status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                           {"action": "rotate", "value": 90,
+                                            "expectedRevision": self.state.pi["revision"]})
+            self.assertEqual(status, 200)
+            self.assertIn("\\frz270", self.overlays(mpv)[-1]["data"])
+            for body, code, field in (({"text": "x" * 4001}, 400, "text"), ({"text": "   "}, 400, "text"),
+                                      ({"text": "ok", "title": 5}, 400, "title")):
+                status, data, _ = self.request("POST", "/v1/display/show", body)
+                self.assertEqual((status, json.loads(data)["field"]), (code, field))
+            status, result = self.upload("/v1/display/show", b"plain", {"Content-Type": "text/plain"})
+            self.assertEqual((status, result["code"]), (415, "DISPLAY_INVALID"))
+            with patch.object(self.state, "show_wallpaper", return_value=True) as cover:
+                status, data, _ = self.request("POST", "/v1/player/pi/immediate", {"action": "stop"})
+                cover.assert_called_once()
+            player = json.loads(data)["player"]
+            self.assertEqual((status, player["state"]), (200, "idle"))
+            self.assertNotIn("kind", player)
+            self.assertEqual(len(self.overlays(mpv, "none")), 1)
+        self.assertEqual(self.state.wallpaper.read_bytes(), b"cover")
+
+    def test_text_is_laid_out_large_and_cut_only_after_a_whole_word(self):
+        from media import screen
+        short = screen.layout("Hello", "Dinner is ready", 1920, 1080)
+        self.assertEqual((short["cut"], short["size"], short["lines"], short["titleLines"]),
+                         (False, 1080 // 7, ["Hello", "", "Dinner is ready"], 1))
+        words = [f"word{i % 97}" for i in range(700)]
+        long = screen.layout(None, " ".join(words), 1920, 1080)
+        self.assertTrue(long["cut"])
+        self.assertEqual(long["size"], 1080 // 18)
+        cols = int(1920 * 0.88 // (long["size"] * screen.CHAR_WIDTH))
+        rows = int(1080 * 0.84 // (long["size"] * screen.LINE_HEIGHT))
+        self.assertLessEqual(len(long["lines"]), rows)
+        self.assertTrue(all(screen.text_width(line) <= cols for line in long["lines"]))
+        shown = " ".join(long["lines"]).split()
+        self.assertEqual(shown, words[:len(shown)])
+        self.assertNotIn("…", "".join(long["lines"]))
+        self.assertFalse(long["lines"][-1].endswith("..."))
+        # A word wider than the screen is wrapped; the cut never ends inside it.
+        giant = "x" * 5000
+        cut = screen.layout(None, "start " + giant, 1920, 1080)
+        self.assertEqual(cut["lines"], ["start"])
+        wide = screen.layout(None, "東京 " * 10, 1920, 1080)
+        self.assertEqual(screen.text_width(wide["lines"][0]), len(wide["lines"][0].replace(" ", "")) * 2 +
+                         wide["lines"][0].count(" "))
+
+    def test_slideshow_loops_folder_photos_in_name_order_until_replaced_or_stopped(self):
+        photos = self.root / "Photos"
+        (photos / "sub").mkdir(parents=True)
+        for name in ("b.jpg", "A.png", "c.JPG", "notes.txt", ".hidden.jpg", "sub/deeper.jpg"):
+            (photos / name).write_bytes(b"image")
+        (photos / "outside.jpg").symlink_to(Path(self.tmp.name) / "history.db")
+        (self.root / "Empty").mkdir()
+        (self.root / "linked").symlink_to(photos)
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()) as mpv:
+            status, data, _ = self.request("POST", "/v1/display/slideshow",
+                                           {"driveId": "disk1", "path": "Photos", "seconds": 5})
+            result = json.loads(data)
+            self.assertEqual((status, result["sentToDisplay"]), (200, True))
+            self.assertEqual({k: result["player"][k] for k in ("state", "kind", "name", "count")},
+                             {"state": "showing", "kind": "slideshow", "name": "Photos", "count": 3})
+            loads = [c.args[0][1:] for c in mpv.call_args_list
+                     if isinstance(c.args[0], list) and c.args[0][0] == "loadfile"]
+            self.assertEqual(loads, [[str(photos / "A.png"), "replace"], [str(photos / "b.jpg"), "append"],
+                                     [str(photos / "c.JPG"), "append"]])
+            mpv.assert_any_call(["set_property", "image-display-duration", 5])
+            mpv.assert_any_call(["set_property", "loop-playlist", "inf"])
+            status, data, _ = self.request("POST", "/v1/display/slideshow", {"driveId": "disk1", "path": "Photos"})
+            mpv.assert_any_call(["set_property", "image-display-duration", 8])
+            for body, code, error_code in (({"driveId": "disk1", "path": "Photos", "seconds": 2}, 400, "SLIDESHOW_INVALID"),
+                                           ({"driveId": "disk1", "path": "Photos", "seconds": 61}, 400, "SLIDESHOW_INVALID"),
+                                           ({"driveId": "disk1", "path": "Empty"}, 400, "SLIDESHOW_EMPTY"),
+                                           ({"driveId": "disk1", "path": "../"}, 400, "PATH_INVALID"),
+                                           ({"driveId": "disk1", "path": "linked"}, 400, "PATH_INVALID"),
+                                           ({"driveId": "nope", "path": ""}, 404, "DRIVE_UNKNOWN")):
+                status, data, _ = self.request("POST", "/v1/display/slideshow", body)
+                self.assertEqual((status, json.loads(data)["code"]), (code, error_code), body)
+            status, data, _ = self.request("POST", "/v1/display/slideshow", {"driveId": "disk1", "path": "Empty"})
+            self.assertEqual(json.loads(data)["message"], "This folder has no photos to show")
+            self.assertEqual(self.state.pi["kind"], "slideshow")
+        sets, player = self.play_and_capture()
+        self.assertEqual((sets["loop-playlist"], player["state"]), ("no", "playing"))
+        self.assertNotIn("kind", player)
+        with patch.object(self.state, "_start_player"), \
+                patch.object(self.state, "_mpv", side_effect=self.fake_screen()) as mpv:
+            self.state.slideshow({"driveId": "disk1", "path": "Photos"})
+            with patch.object(self.state, "show_wallpaper", return_value=True):
+                status, data, _ = self.request("POST", "/v1/player/pi/commands",
+                                               {"action": "stop", "expectedRevision": self.state.pi["revision"]})
+            self.assertEqual(json.loads(data)["player"]["state"], "idle")
+            calls = [c.args[0] for c in mpv.call_args_list]
+            self.assertLess(calls.index(["set_property", "loop-playlist", "no"]), calls.index(["stop"]))
+
     def test_bootstrap_link_is_secret_scoped_and_expires(self):
         marker = Path(self.tmp.name) / "app-bootstrap-token"
         marker.write_text("s" * 40)
