@@ -224,9 +224,16 @@ Ranked by what the owner meets most often.
 
 A build is staged on the Pi after each numbered step, with a hash check.
 
-## What waits on the owner
+## The owner's rulings, 2026-09-30
 
-One decision page, `csync-completion`, carries the open calls: which chat
-items to build, which UI suggestions to accept, and which half-done rows to
-drop instead of finish. Every question arrives with a recommended answer, so
-silence on a row means the recommendation stands.
+Answered on the decision page `csync-completion`. The answer string was
+`D1a D2a D3a D4a` with one note, and no item was marked to skip.
+
+| # | Question | Ruling |
+|---|---|---|
+| D1 | Default icon | Orbit. |
+| D2 | An Ask the Pi widget beyond the mock's four | Yes. |
+| D3 | Half-done capabilities | Finish all of them, screen and one-app share last as a spike. Nothing is dropped. |
+| D4 | Where conversations live | On the Pi, with the phone keeping a copy for offline reading. In the owner's words: "Let the pi own the chats, so when we bring a second client in the future we don't lose context (it will still be me using it)". |
+| Chat | The fourteen chat items | All are to be built. This is the power-user spec the chat screen is held to. |
+| UI | The twelve UI suggestions | All accepted. Landscape and tablets come after the rest. |

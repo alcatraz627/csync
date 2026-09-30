@@ -13,39 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
 // maxTurns caps the per-session history replayed to the model, so a long chat
 // stays affordable and within context.
 const maxTurns = 40
-
-type store struct {
-	mu       sync.Mutex
-	sessions map[string][]gContent
-}
-
-func newStore() *store { return &store{sessions: map[string][]gContent{}} }
-
-func (s *store) append(session string, c gContent) []gContent {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	h := append(s.sessions[session], c)
-	if len(h) > maxTurns {
-		h = h[len(h)-maxTurns:]
-	}
-	s.sessions[session] = h
-	out := make([]gContent, len(h))
-	copy(out, h)
-	return out
-}
-
-func (s *store) reset(session string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, session)
-}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -80,9 +53,10 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	sessions := newStore()
+	sessions := newConvStore(conversationsDir())
 
 	mux := http.NewServeMux()
+	conversationRoutes(mux, token, sessions)
 	mux.HandleFunc("/whoami", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loadAssistConfig()
 		writeJSON(w, map[string]any{
@@ -176,7 +150,11 @@ func serve() error {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		history := sessions.append(req.Session, gContent{Role: "user", Parts: parts})
+		history, err := sessions.userTurn(req.Session, req.Message, gContent{Role: "user", Parts: parts})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		// Streaming mode (?stream=1): send each turn as newline-delimited JSON,
 		// flushed the moment it happens, so the app shows tool calls and results
@@ -187,6 +165,7 @@ func serve() error {
 			flusher, _ := w.(http.Flusher)
 			enc := json.NewEncoder(w)
 			emit := func(t turn) {
+				sessions.assistantTurn(req.Session, t)
 				_ = enc.Encode(map[string]any{"turn": t})
 				if flusher != nil {
 					flusher.Flush()
@@ -194,9 +173,7 @@ func serve() error {
 			}
 			turns, err := run(key, cfg.Model, cfg.Effort, systemPrompt(), history, emit)
 			reply := finalText(turns)
-			if reply != "" {
-				sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
-			}
+			sessions.answered(req.Session, reply)
 			if err != nil {
 				log.Printf("chat error (session %s): %v", req.Session, err)
 				_ = enc.Encode(map[string]any{"error": err.Error()})
@@ -209,10 +186,11 @@ func serve() error {
 		}
 
 		turns, err := run(key, cfg.Model, cfg.Effort, systemPrompt(), history, nil)
-		reply := finalText(turns)
-		if reply != "" {
-			sessions.append(req.Session, gContent{Role: "model", Parts: []gPart{{Text: reply}}})
+		for _, t := range turns {
+			sessions.assistantTurn(req.Session, t)
 		}
+		reply := finalText(turns)
+		sessions.answered(req.Session, reply)
 		if err != nil {
 			log.Printf("chat error (session %s): %v", req.Session, err)
 			if reply == "" {
@@ -233,7 +211,10 @@ func serve() error {
 		if req.Session == "" {
 			req.Session = "default"
 		}
-		sessions.reset(req.Session)
+		if err := sessions.remove(req.Session); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	// /media serves a captured or shared file by name so the app can show it inline.
