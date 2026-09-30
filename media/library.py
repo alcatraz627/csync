@@ -124,26 +124,34 @@ class Library:
             return False
         if self.fixture_mounts:
             return True
-        if drive.uuid.startswith("LABEL:"):
-            label = drive.uuid.partition(":")[2]
-            if not (Path("/dev/disk/by-label") / label).exists():
-                return False
-            # Access activates the systemd automount after a drive is inserted.
+        by_label = drive.uuid.startswith("LABEL:")
+        device = Path("/dev/disk/by-label" if by_label else "/dev/disk/by-uuid") / (
+            drive.uuid.partition(":")[2] if by_label else drive.uuid)
+        if by_label and not device.exists():
+            return False
+        if device.exists() and not self._is_real_mount(drive):
+            # The drives are systemd automounts: nothing is mounted until the folder
+            # is first read. Asking "is it mounted" alone would never mount it, so a
+            # drive that is plugged in is read once here.
             try:
                 subprocess.run(["python3", "-c", "import os,sys; next(os.scandir(sys.argv[1]),None)",
                                 str(drive.root)],
                                capture_output=True, timeout=7, check=False)
             except subprocess.TimeoutExpired:
                 return False
+        return self._is_real_mount(drive)
+
+    def _is_real_mount(self, drive: Drive) -> bool:
+        """True when the drive's own filesystem is mounted there, not just the automount placeholder."""
         if not os.path.ismount(drive.root):
             return False
+        by_label = drive.uuid.startswith("LABEL:")
         result = subprocess.run(
-            ["findmnt", "-n", "-o", "LABEL" if drive.uuid.startswith("LABEL:") else "UUID",
-             "--target", str(drive.root)],
+            ["findmnt", "-n", "-o", "LABEL" if by_label else "UUID", "--target", str(drive.root)],
             capture_output=True, text=True, timeout=3, check=False,
         )
-        expected = drive.uuid.partition(":")[2] if drive.uuid.startswith("LABEL:") else drive.uuid
-        return result.returncode == 0 and result.stdout.strip() == expected
+        expected = drive.uuid.partition(":")[2] if by_label else drive.uuid
+        return result.returncode == 0 and expected in result.stdout.split()
 
     def drive_status(self) -> list[dict]:
         result = []

@@ -1204,6 +1204,9 @@ def main():
     local_server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     threading.Thread(target=local_server.serve_forever, daemon=True).start()
     print(f"csync media listening on {args.bind}:{args.port} and 127.0.0.1:{args.port}", flush=True)
+    # The first mount after a boot includes a disk check and can take longer than one
+    # request waits, so the drives are woken here and are ready before the phone asks.
+    threading.Thread(target=library.drive_status, daemon=True).start()
     if state.wallpaper.is_file():
         def restore_wallpaper():
             try:
