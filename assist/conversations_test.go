@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func say(text string) gContent { return gContent{Role: "user", Parts: []gPart{{Text: text}}} }
@@ -23,6 +24,24 @@ func TestConversationSurvivesAReload(t *testing.T) {
 	}
 	if again.Title != "Which drives are connected?" || len(again.Transcript) != 2 || len(again.History) != 2 {
 		t.Fatalf("after a reload: title %q, %d transcript entries, %d history entries", again.Title, len(again.Transcript), len(again.History))
+	}
+}
+
+func TestEveryEntrySaysWhenItHappenedAndKeepsItAcrossAReload(t *testing.T) {
+	dir := t.TempDir()
+	s := newConvStore(dir)
+	before := time.Now().UnixMilli()
+	_, _ = s.userTurn("c", "hello", say("hello"))
+	s.assistantTurn("c", turn{Type: "text", Text: "hi"})
+	again, err := newConvStore(dir).load("c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, entry := range again.Transcript {
+		at, _ := entry["at"].(float64)
+		if int64(at) < before || int64(at) > time.Now().UnixMilli() {
+			t.Errorf("entry %d: at is %v, want a time during this test", i, entry["at"])
+		}
 	}
 }
 

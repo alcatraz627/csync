@@ -116,7 +116,7 @@ func (s *convStore) userTurn(id, text string, content gContent) ([]gContent, err
 		if c.Title == "" {
 			c.Title = titleFrom(text)
 		}
-		c.Transcript = append(c.Transcript, map[string]any{"role": "user", "text": text})
+		c.Transcript = append(c.Transcript, map[string]any{"role": "user", "text": text, "at": time.Now().UnixMilli()})
 		c.History = append(c.History, content)
 		if len(c.History) > maxTurns {
 			c.History = c.History[len(c.History)-maxTurns:]
@@ -132,7 +132,11 @@ func (s *convStore) userTurn(id, text string, content gContent) ([]gContent, err
 func (s *convStore) assistantTurn(id string, t turn) {
 	var entry map[string]any
 	raw, _ := json.Marshal(t)
-	_ = json.Unmarshal(raw, &entry)
+	if json.Unmarshal(raw, &entry) != nil || entry == nil {
+		return
+	}
+	// When it happened, so a device can group messages by day and show the time in each.
+	entry["at"] = time.Now().UnixMilli()
 	_, _ = s.change(id, func(c *conversation) { c.Transcript = append(c.Transcript, entry) })
 }
 
