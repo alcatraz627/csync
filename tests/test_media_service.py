@@ -282,6 +282,56 @@ class MediaServiceTest(unittest.TestCase):
         with self.state._db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM note_images WHERE note_id=?", (note["id"],)).fetchone()[0], 0)
 
+    def upload(self, path, body, headers):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        conn.request("POST", path, body, {"X-Csync-Token": "secret", **headers})
+        response = conn.getresponse()
+        result = response.status, json.loads(response.read())
+        conn.close()
+        return result
+
+    def test_note_keeps_any_file_inside_its_own_folder_until_removed(self):
+        note = self.state.note_create({"title": "Paperwork", "body": "Receipts"})
+        route = "/v1/notes/" + note["id"] + "/files"
+        pdf = b"%PDF-1.4 fixture" * 10
+        status, result = self.upload(route + "?name=..%2F..%2F%C3%A9vil+report.pdf", pdf,
+                                     {"Content-Type": "application/pdf"})
+        self.assertEqual(status, 201)
+        attached = result["file"]
+        self.assertEqual((attached["name"], attached["mime"], attached["size"]),
+                         ("_.._évil report.pdf", "application/pdf", len(pdf)))
+        folder = Path(self.tmp.name) / "note-files" / note["id"]
+        self.assertEqual([p.name for p in folder.iterdir()], [attached["id"]])
+        self.assertEqual([p.name for p in Path(self.tmp.name).rglob("*évil*")], [])
+        status, data, _ = self.request("GET", "/v1/notes/" + note["id"])
+        self.assertEqual(json.loads(data)["note"]["files"], [attached])
+        status, data, _ = self.request("GET", route)
+        self.assertEqual(json.loads(data)["files"], [attached])
+        status, data, _ = self.request("GET", "/v1/notes/" + note["id"] + "/images")
+        self.assertEqual((status, json.loads(data)), (200, {"images": []}))
+        status, data, headers = self.request("GET", route + "/" + attached["id"])
+        self.assertEqual((status, data, headers["Content-Type"]), (200, pdf, "application/pdf"))
+        self.assertIn('filename="_..__vil report.pdf"', headers["Content-Disposition"])
+        self.assertIn("filename*=UTF-8''_.._%C3%A9vil%20report.pdf", headers["Content-Disposition"])
+        status, data, _ = self.request("GET", route + "/" + attached["id"], headers={"X-Csync-Token": "wrong"})
+        self.assertEqual((status, json.loads(data)["code"]), (401, "AUTH_REQUIRED"))
+        status, result = self.upload(route + "?name=notes.txt", b"plain words", {})
+        self.assertEqual((status, result["file"]["mime"]), (201, "text/plain"))
+        with self.assertRaises(MediaError) as error:
+            self.state.note_file_add(note["id"], "big.bin", "", 20 * 1024 * 1024 + 1, io.BytesIO(b""))
+        self.assertEqual(error.exception.code, "FILE_INVALID")
+        status, data, _ = self.request("DELETE", route + "/" + attached["id"])
+        self.assertEqual((status, json.loads(data)["deleted"]), (200, True))
+        self.assertFalse((folder / attached["id"]).exists())
+        status, data, _ = self.request("GET", route + "/" + attached["id"])
+        self.assertEqual((status, json.loads(data)["code"]), (404, "FILE_NOT_FOUND"))
+        self.assertEqual(len(self.state.note_files(note["id"])), 1)
+        status, data, _ = self.request("DELETE", "/v1/notes/" + note["id"], {"expectedRevision": 1})
+        self.assertEqual(status, 200)
+        self.assertFalse(folder.exists())
+        with self.state._db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM note_files").fetchone()[0], 0)
+
     def test_bootstrap_link_is_secret_scoped_and_expires(self):
         marker = Path(self.tmp.name) / "app-bootstrap-token"
         marker.write_text("s" * 40)

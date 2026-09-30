@@ -9,6 +9,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import stat
@@ -18,10 +19,12 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from .camera import Camera
 from .library import Drive, Library, MediaError
+
+NOTE_FILE_LIMIT = 20 * 1024 * 1024
 
 
 class State:
@@ -67,6 +70,7 @@ class State:
         self.player_command = player_command
         self.camera = camera
         self.wallpaper = database.parent / "wallpaper.jpg"
+        self.note_files_root = database.parent / "note-files"
         self.player_process = None
         self.lock = threading.RLock()
         self.play_lock = threading.Lock()
@@ -107,6 +111,12 @@ class State:
                 db.execute("ALTER TABLE pins ADD COLUMN content TEXT NOT NULL DEFAULT ''")
             if "tags" not in pin_columns:
                 db.execute("ALTER TABLE pins ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+            # A note's other files live on disk, one folder per note, named by
+            # their id; the name the phone sent is kept only as a label.
+            db.execute("""CREATE TABLE IF NOT EXISTS note_files (
+                id TEXT PRIMARY KEY, note_id TEXT NOT NULL, name TEXT NOT NULL,
+                mime TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)""")
+            db.execute("CREATE INDEX IF NOT EXISTS note_files_note ON note_files(note_id, created_at)")
 
     def _db(self):
         return sqlite3.connect(self.database, timeout=5)
@@ -148,9 +158,13 @@ class State:
     def note_get(self, note_id: str) -> dict:
         with self._db() as db:
             row = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes WHERE id=?", (note_id,)).fetchone()
+            if row is not None:
+                files = db.execute("SELECT id,name,mime,size FROM note_files WHERE note_id=? "
+                                   "ORDER BY created_at,id", (note_id,)).fetchall()
         if row is None:
             raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
-        return self._note_row(row)
+        return {**self._note_row(row),
+                "files": [{"id": f[0], "name": f[1], "mime": f[2], "size": f[3]} for f in files]}
 
     def note_create(self, body: dict) -> dict:
         title, content = self._note_fields(body)
@@ -176,10 +190,94 @@ class State:
             changed = db.execute("DELETE FROM notes WHERE id=? AND revision=?", (note_id, revision)).rowcount
             if changed:
                 db.execute("DELETE FROM note_images WHERE note_id=?", (note_id,))
+                db.execute("DELETE FROM note_files WHERE note_id=?", (note_id,))
         if not changed:
             self.note_get(note_id)
             raise MediaError("NOTE_CONFLICT", "This note changed elsewhere. Reload it before deleting", 409)
+        folder = self._note_folder(note_id)
+        if folder.is_symlink():
+            folder.unlink()
+        elif folder.exists():
+            shutil.rmtree(folder, ignore_errors=True)
         return {"deleted": True, "id": note_id}
+
+    def _note_folder(self, note_id: str) -> Path:
+        """Where a note's files are kept. Only plain ids become folder names."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", note_id):
+            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        return self.note_files_root / note_id
+
+    def note_files(self, note_id: str) -> list[dict]:
+        return self.note_get(note_id)["files"]
+
+    def note_file_add(self, note_id: str, name: str, content_type: str, length: int, source) -> dict:
+        """Keep any file up to 20 MB with a note, streamed to disk and checked for length."""
+        if not isinstance(length, int) or not 1 <= length <= NOTE_FILE_LIMIT:
+            raise MediaError("FILE_INVALID", "Choose a file of up to 20 MB")
+        clean = re.sub(r"[/\\\x00-\x1f\x7f]", "_", name or "").strip(" .")[:240]
+        if not clean:
+            raise MediaError("FILE_INVALID", "Send the file with its name")
+        mime = content_type.split(";", 1)[0].strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}", mime) or \
+                mime == "application/octet-stream":
+            mime = mimetypes.guess_type(clean)[0] or "application/octet-stream"
+        self.note_get(note_id)
+        folder = self._note_folder(note_id)
+        file_id, now = str(uuid.uuid4()), int(time.time())
+        candidate, final = folder / f".{file_id}.upload", folder / file_id
+        try:
+            folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if folder.is_symlink() or not folder.is_dir():
+                raise OSError("note folder is not a directory")
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(candidate, flags, 0o600), "wb") as output:
+                remaining = length
+                while remaining:
+                    chunk = source.read(min(65536, remaining))
+                    if not chunk:
+                        raise MediaError("UPLOAD_INCOMPLETE", "The phone stopped sending the file", 409)
+                    output.write(chunk)
+                    remaining -= len(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(candidate, final)
+        except (OSError, TimeoutError):
+            candidate.unlink(missing_ok=True)
+            raise MediaError("FILE_FAILED", "The Pi could not save this file", 503)
+        except MediaError:
+            candidate.unlink(missing_ok=True)
+            raise
+        with self._db() as db:
+            # The note may have been deleted while the file was arriving.
+            added = db.execute("INSERT INTO note_files SELECT ?,?,?,?,?,? WHERE EXISTS "
+                               "(SELECT 1 FROM notes WHERE id=?)",
+                               (file_id, note_id, clean, mime, length, now, note_id)).rowcount
+        if not added:
+            final.unlink(missing_ok=True)
+            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        return {"id": file_id, "name": clean, "mime": mime, "size": length}
+
+    def note_file_open(self, note_id: str, file_id: str) -> tuple[dict, int]:
+        self.note_get(note_id)
+        with self._db() as db:
+            row = db.execute("SELECT id,name,mime,size FROM note_files WHERE note_id=? AND id=?",
+                             (note_id, file_id)).fetchone()
+        if row is None:
+            raise MediaError("FILE_NOT_FOUND", "This file is no longer in the note", 404)
+        try:
+            fd = os.open(self._note_folder(note_id) / row[0], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            raise MediaError("FILE_NOT_FOUND", "This file is no longer on the Pi", 404)
+        return {"id": row[0], "name": row[1], "mime": row[2], "size": row[3]}, fd
+
+    def note_file_delete(self, note_id: str, file_id: str) -> dict:
+        self.note_get(note_id)
+        with self._db() as db:
+            removed = db.execute("DELETE FROM note_files WHERE note_id=? AND id=?", (note_id, file_id)).rowcount
+        if not removed:
+            raise MediaError("FILE_NOT_FOUND", "This file is no longer in the note", 404)
+        (self._note_folder(note_id) / file_id).unlink(missing_ok=True)
+        return {"deleted": True, "id": file_id}
 
     @staticmethod
     def _pin_fields(body: dict) -> tuple[str, str, str, str, list[str]]:
@@ -906,6 +1004,25 @@ def handler_for(state: State, token: str):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def _note_file(self, note_id: str, file_id: str):
+            meta, fd = state.note_file_open(note_id, file_id)
+            try:
+                length = os.fstat(fd).st_size
+                ascii_name = re.sub(r"[^A-Za-z0-9._ -]", "_", meta["name"]) or "file"
+                self.send_response(200)
+                self.send_header("Content-Type", meta["mime"])
+                self.send_header("Content-Length", str(length))
+                self.send_header("Content-Disposition", f'attachment; filename="{ascii_name}"; '
+                                 f"filename*=UTF-8''{quote(meta['name'], safe='')}")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Cache-Control", "private, no-store")
+                self.end_headers()
+                if self.command != "HEAD":
+                    while chunk := os.read(fd, 65536):
+                        self.wfile.write(chunk)
+            finally:
+                os.close(fd)
+
         def _bootstrap(self, provided: str) -> bool:
             marker = state.database.parent / "app-bootstrap-token"
             try:
@@ -1000,6 +1117,10 @@ def handler_for(state: State, token: str):
                     return self._note_image(parts[3], parts[5])
                 if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
                     return self._json(200, {"images": state.note_images(parts[3])})
+                if len(parts) == 6 and parts[1:3] == ["v1", "notes"] and parts[4] == "files":
+                    return self._note_file(parts[3], parts[5])
+                if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "files":
+                    return self._json(200, {"files": state.note_files(parts[3])})
                 if path.startswith("/v1/notes/"):
                     return self._json(200, {"note": state.note_get(path.removeprefix("/v1/notes/"))})
                 if path == "/v1/player/pi":
@@ -1036,6 +1157,15 @@ def handler_for(state: State, token: str):
                     if not 8 <= length <= 1024 * 1024:
                         raise MediaError("IMAGE_INVALID", "Choose a PNG image under 1 MB")
                     return self._json(201, {"image": state.note_image_add(parts[3], self.rfile.read(length))})
+                if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "files":
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError:
+                        length = 0
+                    self.connection.settimeout(30)
+                    return self._json(201, {"file": state.note_file_add(
+                        parts[3], query.get("name", [""])[0], self.headers.get("Content-Type", ""),
+                        length, self.rfile)})
                 if path == "/v1/cast/file":
                     try:
                         length = int(self.headers.get("Content-Length", "0"))
@@ -1084,6 +1214,9 @@ def handler_for(state: State, token: str):
                 if self.command == "PUT":
                     return self._json(200, {"pin": state.pin_update(pin_id, body)})
                 return self._json(200, state.pin_delete(pin_id, body))
+            elif self.command == "DELETE" and len(parts) == 6 and parts[1:3] == ["v1", "notes"] and \
+                    parts[4] == "files":
+                return self._json(200, state.note_file_delete(parts[3], parts[5]))
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
                 note_id = path.removeprefix("/v1/notes/")
                 body = self._body(320 * 1024)
