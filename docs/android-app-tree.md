@@ -115,7 +115,7 @@ lit on Settings, Tools, Notes, the camera; Media stays lit on the Pi screen page
 | Conversation (find or suggestions open) | closes that first, then the list |
 | Conversation | Chat list |
 | Captures | Pi camera; Pi camera → More |
-| Note edit | the note; Note or Pin → the list; Notes list → More |
+| Note edit | the note; Note or Pin → the list; Notes list → More. Unsaved words, or a file waiting to be added, are asked about first (Keep it, Drop), whichever way the editor is left |
 | Process monitor or Widgets | Tools; Tools → More |
 | Connection | Settings; Settings → More |
 | Assistant guide, Help and about | More |
