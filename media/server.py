@@ -635,7 +635,6 @@ class State:
             return False
         settings = self.display_settings_now()
         self._start_player()
-        # A live feed leaves mpv untimed and expecting MJPEG; the cover is a plain picture again.
         self._plain_picture()
         # The cover is framed the way the screen in use asks: turned with the screen and then by
         # its own quarter turns, and cropped to fill, shown whole, or pulled to the edges.
@@ -650,8 +649,6 @@ class State:
         """Undo the cover's framing before anything else is drawn, so a film is never cropped or pulled."""
         self._mpv(["set_property", "panscan", 0.0])
         self._mpv(["set_property", "keepaspect", True])
-        self._mpv(["set_property", "demuxer-lavf-format", ""])
-        self._mpv(["set_property", "untimed", False])
 
     def set_wallpaper(self, image: bytes) -> dict:
         if len(image) < 100 or len(image) > 10 * 1024 * 1024 or not image.startswith(b"\xff\xd8\xff"):
@@ -894,15 +891,15 @@ class State:
                 self._start_player()
                 size = self._screen_size() if text else None
                 self._plain_picture()
-                # A live feed is a bare stream of JPEG frames with no clock; mpv draws each as it comes.
-                self._mpv(["set_property", "demuxer-lavf-format", "mjpeg" if live else ""])
-                self._mpv(["set_property", "untimed", live])
                 self._mpv(["set_property", "pause", False])
                 self._mpv(["set_property", "loop-file", "no"])
                 self._mpv(["set_property", "video-rotate", rotate])
                 self._mpv(["set_property", "image-display-duration", seconds or "inf"])
                 self._mpv(["set_property", "loop-playlist", "inf" if seconds else "no"])
-                self._mpv(["loadfile", paths[0], "replace"])
+                # A live feed is a bare stream of JPEG frames with no clock. The settings ride on this
+                # one file: set globally, no value undoes them (an empty one forces a format named "").
+                live_options = "demuxer-lavf-format=mjpeg,untimed=yes"
+                self._mpv(["loadfile", paths[0], "replace"] + ([live_options] if live else []))
                 for extra in paths[1:]:
                     self._mpv(["loadfile", extra, "append"])
                 # A still that ran out under keep-open leaves mpv paused; lifting pause before the load did not stick.

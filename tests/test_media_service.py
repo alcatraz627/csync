@@ -672,9 +672,7 @@ class MediaServiceTest(unittest.TestCase):
             watcher.join(timeout=5)
             self.assertEqual((response.status, result["ended"], result["player"]["state"]), (200, True, "idle"))
             self.assertEqual(bytes(seen), b"".join(frames))
-            mpv.assert_any_call(["loadfile", str(pipe), "replace"])
-            mpv.assert_any_call(["set_property", "demuxer-lavf-format", "mjpeg"])
-            mpv.assert_any_call(["set_property", "untimed", True])
+            mpv.assert_any_call(["loadfile", str(pipe), "replace", "demuxer-lavf-format=mjpeg,untimed=yes"])
             cover.assert_called()
             self.assertFalse(pipe.exists())
             self.assertIsNone(self.state.screen_feed)
@@ -1197,9 +1195,10 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(data)["player"]["kind"], "camera")
             self.assertTrue(stat.S_ISFIFO(pipe.stat().st_mode))
-            sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list if c.args[0][0] == "set_property"}
-            self.assertEqual((sets["demuxer-lavf-format"], sets["untimed"]), ("mjpeg", True))
-            mpv.assert_any_call(["loadfile", str(pipe), "replace"])
+            # The feed's demuxer and clock settings belong to this one file, never to mpv as a whole.
+            mpv.assert_any_call(["loadfile", str(pipe), "replace", "demuxer-lavf-format=mjpeg,untimed=yes"])
+            self.assertFalse([c for c in mpv.call_args_list
+                              if c.args[0][0] == "set_property" and c.args[0][1] in ("demuxer-lavf-format", "untimed")])
             # Standing in for mpv: read the pipe and get the camera's frames back to back.
             reader = os.open(pipe, os.O_RDONLY)
             got = b""
@@ -1216,12 +1215,14 @@ class MediaServiceTest(unittest.TestCase):
                     break
                 time.sleep(0.1)
             self.assertFalse(pipe.exists())
-            # The next thing shown gets a plain demuxer and a clock again.
+            # The next thing shown is loaded plainly: no per-file options and no global undo, which
+            # would force a format named "" and refuse every audio and video file after it.
             mpv.reset_mock()
             self.state.show_text({"text": "after the camera"})
-            sets = {c.args[0][1]: c.args[0][2] for c in mpv.call_args_list
-                    if isinstance(c.args[0], list) and c.args[0][0] == "set_property"}
-            self.assertEqual((sets["demuxer-lavf-format"], sets["untimed"]), ("", False))
+            loads = [c.args[0] for c in mpv.call_args_list if isinstance(c.args[0], list) and c.args[0][0] == "loadfile"]
+            self.assertTrue(loads and all(len(load) == 3 for load in loads), loads)
+            self.assertFalse([c for c in mpv.call_args_list if isinstance(c.args[0], list)
+                              and c.args[0][0] == "set_property" and c.args[0][1] in ("demuxer-lavf-format", "untimed")])
 
 
 if __name__ == "__main__":
