@@ -89,7 +89,9 @@ const SCREENS = {
     body(S) {
       const view = S.view.media, up = piUp(S), drive = S.drive === 'ok', q = S.mediaQuery.trim().toLowerCase();
       const phoneSource = S.source === 'This phone';
-      const scope = view === 'Files' || q ? noteLine(phoneSource ? 'device' : 'files', phoneSource ? 'Browsing this phone' : `Browsing ${S.source}`) : '';
+      const browsing = view === 'Files' && !q && (up || phoneSource) && !(S.source === 'Elements' && !drive);
+      const scope = browsing ? pathLine([[S.source, 'folder', '', phoneSource ? 'device' : 'files'], ...(S.folder ? [[S.folder, '', '', 'folder']] : [])])
+        : view === 'Files' || q ? noteLine(phoneSource ? 'device' : 'files', phoneSource ? 'Browsing this phone' : `Browsing ${S.source}`) : '';
       const top = (S.mediaSearch ? field({ id: 'mediaQuery', hint: `Search ${phoneSource ? 'this phone' : S.source}`, value: S.mediaQuery, icon: 'search' }) : '') +
         seg([['Files', 'files'], ['Videos', 'video'], ['History', 'history'], ['Access', 'access']], view, 'view-media', 'Media views') + scope;
       const itemRow = (it, sub) => row({ icon: KIND_ICON[it.kind], title: it.title, sub, act: 'sheet', arg: `${it.kind === 'folder' ? 'folder' : 'item'}|${it.title}`, opens: true });
@@ -126,9 +128,7 @@ const SCREENS = {
         content = section(`${plural(VIDEOS.length, 'video')} on every connected drive`, group(VIDEOS.map(v => itemRow(v, `${v.folder} · ${v.length}`)).join('')));
       } else {
         const here = LIBRARY[S.folder] || [], folders = here.filter(i => i.kind === 'folder'), files = here.filter(i => i.kind !== 'folder');
-        const upRow = S.folder ? group(row({ icon: 'up', title: `Up to ${S.source}`, sub: `${S.source} / ${S.folder}`, act: 'folder', arg: '' })) : '';
-        content = upRow +
-          (folders.length ? section('Folders', group(folders.map(f => row({ icon: 'folder', title: f.title, sub: plural(f.count, 'item'), act: 'folder', arg: f.title, opens: true,
+        content = (folders.length ? section('Folders', group(folders.map(f => row({ icon: 'folder', title: f.title, sub: plural(f.count, 'item'), act: 'folder', arg: f.title, opens: true,
             trailing: ibtn('download', `Save or send the folder ${f.title}`, 'sheet', `folder|${f.title}`, 'quiet', 18) })).join(''))) : '') +
           (files.length ? section('Files', group(files.map(f => itemRow(f, f.length ? `${f.length} · ${f.size}` : f.size)).join(''))) : '') +
           (!here.length ? empty('folder', 'This folder is empty', '', btn(`Up to ${S.source}`, 'up', 'folder', '')) : '');
@@ -162,22 +162,9 @@ const SCREENS = {
           row({ icon: 'launcher', title: 'One app', sub: 'Only that app is shown', act: 'sheet', arg: 'cast|app', opens: true }) +
           row({ icon: 'link', title: 'A link', sub: 'YouTube, or share a video from another app', act: 'sheet', arg: 'youtube', opens: true }) +
           row({ icon: 'note', title: 'A note', sub: 'Shown large, easy to read across a room', act: 'sheet', arg: 'show-note', opens: true }))) +
-        section('When nothing is playing', group(row({ icon: 'image', title: 'Cover image', value: S.cover, act: 'go', arg: 'covers', opens: true })));
-    }
-  },
-
-  covers: {
-    body(S) {
-      const f = S.framing[S.cover] || { fit: 'Cover', rotate: 0, crop: 'Full' }, at = Math.max(0, COVERS.indexOf(S.cover));
-      return head(S.cover, 'Shown on the Pi screen when nothing is playing') +
-        framedPicture(COVER_ART[at] || COVER_ART[0], f, ['screen', 'On the Pi screen']) +
-        coverGrid(COVERS, COVER_ART, S.cover, 'cover') +
-        btns(btn('Add an image', 'plus', 'toast', 'Choose an image from this phone')) +
-        section('Frame this image',
-          labelled('Fit', seg([['Cover', 'expand'], ['Contain', 'fit'], ['Stretch', 'screen']], f.fit, 'frame-fit', 'Fit')) +
-          group(row({ icon: 'rotate', title: 'Rotate', value: `${f.rotate}°`, act: 'frame-turn' })) +
-          labelled('Crop', seg([['Full', 'image'], ['Center', 'crop'], ['Top', 'up']], f.crop, 'frame-crop', 'Crop'), 'The image file is never changed.')) +
-        btns(btn('Clear framing', 'refresh', 'frame-clear', '', 'quiet'));
+        section('This screen', group(
+          row({ icon: 'image', title: 'Cover image', sub: 'Shown when nothing is playing', value: S.cover, act: 'sheet', arg: 'covers', opens: true }) +
+          row({ icon: 'screen', title: 'Display', value: DISPLAYS.find(d => d.name === S.display).name, act: 'sheet', arg: 'display', opens: true })));
     }
   },
 
@@ -286,7 +273,8 @@ const SCREENS = {
           row({ icon: 'settings', title: 'Settings', sub: 'How the app connects, plays and looks', act: 'go', arg: 'settings', opens: true }))) +
         section('Reference', group(
           row({ icon: 'help', title: 'Assistant guide', sub: 'What you can ask the Pi assistant', act: 'go', arg: 'guide', opens: true }) +
-          row({ icon: 'info', title: 'Help and about', sub: 'Version 2.34', act: 'go', arg: 'help', opens: true })));
+          row({ icon: 'info', title: 'Help and about', sub: 'Version 2.34', act: 'go', arg: 'help', opens: true }) +
+          row({ icon: 'palette', title: 'Design system', sub: 'Every part this app is built from', act: 'go', arg: 'showcase', opens: true })));
     }
   },
 
@@ -396,12 +384,23 @@ const SCREENS = {
 
   settings: {
     body(S) {
-      const theme = S.theme === 'system' ? 'System' : S.theme === 'dark' ? 'Dark' : 'Light';
-      return group(
-        row({ icon: 'wifi', title: 'Connection', sub: S.conn.pi, status: piUp(S) ? ['good', 'Connected'] : ['idle', 'Offline'], act: 'go', arg: 'connection', opens: true }) +
-        row({ icon: 'play', title: 'Playback', sub: `Starts ${S.defaults.startVolume === 0 ? 'muted' : `at ${S.defaults.startVolume}%`} on the Pi screen`, act: 'go', arg: 'playback', opens: true }) +
-        row({ icon: 'chat', title: 'Assistant', sub: `${S.defaultModel} ${S.defaultEffort.toLowerCase()}`, act: 'go', arg: 'assistant', opens: true }) +
-        row({ icon: 'palette', title: 'Appearance', sub: `${theme} theme`, act: 'go', arg: 'appearance', opens: true }));
+      const d = S.defaults, missing = MODELS.filter(m => !m.available).map(m => m.provider);
+      const playback = group(
+        row({ icon: 'volume', title: 'Starting volume', sub: 'On the Pi screen', value: d.startVolume === 0 ? 'Muted' : `${d.startVolume}%`, act: 'sheet', arg: 'start-volume', opens: true }) +
+        row({ icon: 'history', title: 'Resume where I stopped', trailing: toggle(d.resume, 'toggle-resume', 'Resume where I stopped') }) +
+        row({ icon: 'loop', title: 'Loop', trailing: toggle(d.loop === 'On', 'default-loop', 'Loop') }) +
+        row({ icon: 'skip', title: 'Skip length', value: `${d.skip} seconds`, act: 'sheet', arg: 'skip|default', opens: true }));
+      const assistant = labelled('Provider', seg(MODELS.map(m => [m.provider, m.icon, !m.available]), S.provider, 'provider', 'Provider'), missing.length ? `${missing.join(' and ')} are not set up on this Pi.` : '') +
+        group(row({ icon: 'think-2', title: 'Model', value: `${S.defaultModel} ${S.defaultEffort.toLowerCase()}`, act: 'sheet', arg: 'model|default', opens: true }) +
+          row({ icon: 'key', title: 'Pi commands', sub: 'Set on the Pi', status: piUp(S) ? ['good', 'Allowed'] : ['idle', 'Offline'] }));
+      const appearance = labelled('Theme', seg([['System', 'system'], ['Light', 'sun'], ['Dark', 'moon']], S.theme === 'system' ? 'System' : S.theme === 'dark' ? 'Dark' : 'Light', 'theme', 'Theme')) +
+        labelled('Text size', seg([['Small', 'text-s'], ['Medium', 'text-m'], ['Large', 'text-l']], { sm: 'Small', md: 'Medium', lg: 'Large' }[S.size], 'size', 'Text size')) +
+        labelled('Primary colour', swatches(ACCENTS, S.accent, S.custom)) +
+        noteLine(['device', 'screen'], 'Applies to every screen and the system bars.');
+      return group(row({ icon: 'wifi', title: 'Connection', sub: S.conn.pi, status: piUp(S) ? ['good', 'Connected'] : ['idle', 'Offline'], act: 'go', arg: 'connection', opens: true })) +
+        section('Playback', playback, 'set-playback', S.folded['set-playback']) +
+        section('Assistant', assistant, 'set-assistant', S.folded['set-assistant']) +
+        section('Appearance', appearance, 'set-appearance', S.folded['set-appearance']);
     }
   },
 
@@ -421,36 +420,6 @@ const SCREENS = {
     }
   },
 
-  playback: {
-    body(S) {
-      const d = S.defaults;
-      return section('On the Pi screen', group(
-        row({ icon: 'volume', title: 'Starting volume', value: d.startVolume === 0 ? 'Muted' : `${d.startVolume}%`, act: 'sheet', arg: 'start-volume', opens: true }))) +
-        section('Everywhere', group(
-          row({ icon: 'history', title: 'Resume where I stopped', trailing: toggle(d.resume, 'toggle-resume', 'Resume where I stopped') }) +
-          row({ icon: 'loop', title: 'Loop', trailing: toggle(d.loop === 'On', 'default-loop', 'Loop') }) +
-          row({ icon: 'skip', title: 'Skip length', value: `${d.skip} seconds`, act: 'sheet', arg: 'skip|default', opens: true })));
-    }
-  },
-
-  assistant: {
-    body(S) {
-      const missing = MODELS.filter(m => !m.available).map(m => m.provider);
-      return labelled('Provider', seg(MODELS.map(m => [m.provider, m.icon, !m.available]), S.provider, 'provider', 'Provider'), missing.length ? `${missing.join(' and ')} are not set up on this Pi.` : '') +
-        group(row({ icon: 'think-2', title: 'Model', value: `${S.defaultModel} ${S.defaultEffort.toLowerCase()}`, act: 'sheet', arg: 'model|default', opens: true })) +
-        section('Set on the Pi', group(row({ icon: 'key', title: 'Pi commands', status: piUp(S) ? ['good', 'Allowed'] : ['idle', 'Offline'] })));
-    }
-  },
-
-  appearance: {
-    body(S) {
-      return labelled('Theme', seg([['System', 'system'], ['Light', 'sun'], ['Dark', 'moon']], S.theme === 'system' ? 'System' : S.theme === 'dark' ? 'Dark' : 'Light', 'theme', 'Theme')) +
-        labelled('Text size', seg([['Small', 'text-s'], ['Medium', 'text-m'], ['Large', 'text-l']], { sm: 'Small', md: 'Medium', lg: 'Large' }[S.size], 'size', 'Text size')) +
-        labelled('Primary colour', swatches(ACCENTS, S.accent, S.custom)) +
-        noteLine(['device', 'screen'], 'Applies to every screen and the system bars.');
-    }
-  },
-
   guide: {
     body() {
       return card(markdown('## Ask\n\nFind a film, ask what is playing, or check how the Pi is doing.\n\n- What is on the Pi screen?\n- Find the knot tutorials shorter than five minutes\n- Is the Pi running hot?\n\n## Act\n\nThe assistant names the output or the device before it acts, the same way the app does.\n\n- Play Walk in the hills on the Pi screen\n- Send the projector note to studio-mac\n- Take a photo with the Pi camera\n\n## Keep\n\nIt can read and write your notes on the Pi.')) +
@@ -461,8 +430,7 @@ const SCREENS = {
   help: {
     body(S) {
       return card(markdown('## Where things live\n\n**Media** browses the drives and plays on the Pi screen or this phone. **Share** sends to your devices. **Chat** talks to the Pi assistant. **More** holds the camera, notes, tools and settings.\n\n## When something does not work\n\nOpen **More**, then **Tools**. It shows how the Pi is doing right now. If the Pi cannot be reached at all, open **Settings**, then **Connection**.')) +
-        group(row({ icon: 'info', title: 'csync', value: S.update ? '2.34' : '2.35' }) + row({ icon: 'pi', title: 'Raspberry Pi', value: S.conn.pi }) +
-          row({ icon: 'palette', title: 'Design system', sub: 'Every part this app is built from', act: 'go', arg: 'showcase', opens: true }));
+        group(row({ icon: 'info', title: 'csync', value: S.update ? '2.34' : '2.35' }) + row({ icon: 'pi', title: 'Raspberry Pi', value: S.conn.pi }));
     }
   },
 

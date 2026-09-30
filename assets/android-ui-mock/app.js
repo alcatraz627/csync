@@ -16,7 +16,7 @@ function freshState() {
     clip: { kind: 'Text', sub: 'Text, 46 characters', body: 'HDMI 2 is the Pi. HDMI 1 is the laptop dock.' }, widgets: ['xkcd'], customDraft: '',
     incomingOptions: { loop: 'Off', speed: 1, volume: 0 }, ytLink: '',
     chatSearch: false, chatQuery: '', threads: clone(THREADS), threadId: 't1', pickedMsg: null, editingTitle: false,
-    draft: '', draftOpen: false, draftHeight: 200, chatAttachment: null, exportFormat: 'Markdown', tabs: 'a',
+    draft: '', draftOpen: false, draftHeight: 200, chatAttachment: null, exportFormat: 'Markdown', display: 'Desk monitor',
     provider: 'Gemini', model: 'gemini-3.8-flash', effort: 'Medium', defaultModel: 'gemini-3.8-flash', defaultEffort: 'Medium', modelDraft: null,
     notes: clone(NOTES), pins: clone(PINS), noteId: 'n1', pinId: 'p1', notesSearch: false, noteQuery: '',
     captures: clone(CAPTURES), recording: false,
@@ -78,7 +78,6 @@ function dress(el, state) {
   el.style.setProperty('--p-accent-fill', fill);
   el.style.setProperty('--p-accent', text);
   el.style.setProperty('--ts', { sm: 1, md: 1.15, lg: 1.3 }[state.size]);
-  el.dataset.tabs = state.tabs;
   el.classList.toggle('narrow', state.size === 'lg');
 }
 
@@ -254,6 +253,7 @@ const ACTS = {
   folder: name => { S.folder = name; S.sheet = null; render(false); },
   cover: name => { S.cover = name; toast(`${name} is the cover`); },
   'set-cover': title => { S.sheet = null; if (!COVERS.includes(title)) COVERS.push(title), COVER_ART.push(COVER_ART[0]); S.cover = title; toast(`${title} is the cover`); },
+  'pick-display': name => { S.display = name; render(); },
   'frame-fit': v => frame('fit', v), 'frame-crop': v => frame('crop', v),
   'frame-turn': () => frame('rotate', (((S.framing[S.cover] || {}).rotate || 0) + 90) % 360),
   'frame-clear': () => { delete S.framing[S.cover]; toast(`Framing cleared for ${S.cover}`); },

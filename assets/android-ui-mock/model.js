@@ -16,9 +16,7 @@ const PLACES = [
     views: ['Files', 'Videos', 'History', 'Access'],
     asks: ['M-01', 'M-02', 'M-03', 'M-04', 'M-06', 'M-09', 'M-10', 'M-11', 'M-12', 'M-13', 'M-14', 'G-24'] },
   { id: 'pi-screen', kind: 'page', parent: 'media', label: 'Pi screen', icon: 'screen', built: 'partly',
-    asks: ['P-02', 'P-03', 'P-04', 'P-05', 'P-06', 'P-07', 'P-08', 'P-09', 'P-10', 'P-11', 'P-21', 'P-24', 'C-01', 'C-07'] },
-  { id: 'covers', kind: 'page', parent: 'pi-screen', label: 'Covers', icon: 'image', built: 'no',
-    asks: ['C-02', 'C-03', 'C-04', 'C-05', 'C-06'] },
+    asks: ['P-02', 'P-03', 'P-04', 'P-05', 'P-06', 'P-07', 'P-08', 'P-09', 'P-10', 'P-11', 'P-21', 'P-24', 'C-01', 'C-02', 'C-03', 'C-04', 'C-05', 'C-06', 'C-07'] },
   { id: 'phone-player', kind: 'page', parent: 'media', label: 'This phone', icon: 'device', built: 'partly',
     asks: ['P-02', 'P-04', 'P-10', 'P-21', 'O-03', 'O-07'] },
 
@@ -57,20 +55,14 @@ const PLACES = [
   { id: 'widgets', kind: 'page', parent: 'tools', label: 'Widgets', icon: 'launcher', built: 'partly',
     asks: ['T-01', 'T-07'] },
   { id: 'settings', kind: 'page', parent: 'more', label: 'Settings', icon: 'settings', built: 'partly',
-    asks: ['SE-20'] },
+    asks: ['SE-20', 'SH-08', 'SE-18', 'SE-19', 'CH-12', 'SE-01', 'SE-02', 'SE-03', 'SE-04', 'SE-05', 'SE-06', 'SE-07', 'SE-08', 'SE-09', 'SE-12', 'SE-16', 'SE-17'] },
   { id: 'connection', kind: 'page', parent: 'settings', label: 'Connection', icon: 'wifi', built: 'partly',
     asks: ['PI-05'] },
-  { id: 'playback', kind: 'page', parent: 'settings', label: 'Playback', icon: 'play', built: 'no',
-    asks: ['SH-08'] },
-  { id: 'assistant', kind: 'page', parent: 'settings', label: 'Assistant', icon: 'chat', built: 'partly',
-    asks: ['SE-18', 'SE-19', 'CH-12'] },
-  { id: 'appearance', kind: 'page', parent: 'settings', label: 'Appearance', icon: 'palette', built: 'yes',
-    asks: ['SE-01', 'SE-02', 'SE-03', 'SE-04', 'SE-05', 'SE-06', 'SE-07', 'SE-08', 'SE-09', 'SE-12', 'SE-16', 'SE-17'] },
   { id: 'guide', kind: 'page', parent: 'more', label: 'Assistant guide', icon: 'help', built: 'partly',
     asks: ['SE-10'] },
   { id: 'help', kind: 'page', parent: 'more', label: 'Help and about', icon: 'info', built: 'partly',
     asks: ['SE-11'] },
-  { id: 'showcase', kind: 'page', parent: 'help', label: 'Design system', icon: 'palette', built: 'no', asks: [] }
+  { id: 'showcase', kind: 'page', parent: 'more', label: 'Design system', icon: 'palette', built: 'no', asks: [] }
 ];
 
 const PLACE = Object.fromEntries(PLACES.map(p => [p.id, p]));

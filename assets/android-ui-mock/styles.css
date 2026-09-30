@@ -201,26 +201,22 @@ button.tile:hover { background: var(--p-surface2); }
 .narrow .player .tiles { grid-template-columns: 1fr 1fr; }
 
 /* segmented control: one spec everywhere */
-.seg { display: flex; gap: 2px; background: var(--p-surface2); border-radius: 14px; padding: 2px; overflow-x: auto; scrollbar-width: none; }
+.seg { display: flex; box-shadow: inset 0 -1px 0 var(--p-line); overflow-x: auto; scrollbar-width: none; }
 .seg::-webkit-scrollbar { display: none; }
-.seg button { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; padding: 0 9px; border-radius: 10px; color: var(--p-dim); font-weight: 600; font-size: calc(13.5px * var(--ts)); white-space: nowrap; }
-.seg button[aria-selected="true"] { background: var(--p-bg); color: var(--p-accent); box-shadow: 0 0 0 1px var(--p-line); }
+.seg button { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; padding: 0 9px; color: var(--p-dim); font-weight: 600; font-size: calc(13.5px * var(--ts)); white-space: nowrap; }
+.seg button[aria-selected="true"] { color: var(--p-accent); box-shadow: inset 0 -2px 0 var(--p-accent); }
+
+/* a path inside something browsed in place */
+.path { display: flex; align-items: center; min-width: 0; margin: -8px 0; color: var(--p-dim); font-size: calc(13.5px * var(--ts)); }
+.path-step { display: inline-flex; align-items: center; gap: 6px; min-height: 48px; min-width: 48px; padding: 0 4px; border-radius: 8px; font-weight: 500; }
+.path-step.now { color: var(--p-text); font-weight: 650; min-width: 0; }
+.path-step span { white-space: nowrap; overflow: hidden; }
 .seg button:disabled { opacity: .45; }
 .seg.tight button { padding: 0 5px; gap: 4px; font-size: calc(13px * var(--ts)); }
 .seg.more { -webkit-mask: linear-gradient(to right, #000 74%, transparent); mask: linear-gradient(to right, #000 74%, transparent); }
 .seg.less { -webkit-mask: linear-gradient(to left, #000 74%, transparent); mask: linear-gradient(to left, #000 74%, transparent); }
 .seg.more.less { -webkit-mask: linear-gradient(to right, transparent, #000 26%, #000 74%, transparent); mask: linear-gradient(to right, transparent, #000 26%, #000 74%, transparent); }
 
-/* Three other looks for the same tabs, switched from the review page so they can be compared on any screen. A is the default above. */
-[data-tabs="b"] .seg { background: none; border-radius: 0; padding: 0; gap: 0; box-shadow: inset 0 -1px 0 var(--p-line); }
-[data-tabs="b"] .seg button { border-radius: 0; }
-[data-tabs="b"] .seg button[aria-selected="true"] { background: none; box-shadow: inset 0 -2px 0 var(--p-accent); }
-[data-tabs="c"] .seg { background: none; padding: 0; gap: 4px; }
-[data-tabs="c"] .seg button { flex: 0 0 auto; padding: 0 9px; border: 6px solid transparent; border-radius: 999px; background: var(--p-surface) padding-box; box-shadow: inset 0 0 0 1px var(--p-line); }
-[data-tabs="c"] .seg button[aria-selected="true"] { background: color-mix(in srgb, var(--p-accent) 16%, var(--p-surface)) padding-box; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-accent) 55%, var(--p-line)); }
-[data-tabs="d"] .seg { background: none; padding: 0; gap: 4px; }
-[data-tabs="d"] .seg button { min-width: 48px; flex-direction: column; gap: 3px; min-height: 58px; border-radius: 14px; font-size: calc(12px * var(--ts)); }
-[data-tabs="d"] .seg button[aria-selected="true"] { background: color-mix(in srgb, var(--p-accent) 14%, var(--p-surface)); box-shadow: none; }
 
 /* buttons */
 .btns { display: flex; flex-wrap: wrap; gap: 8px; }

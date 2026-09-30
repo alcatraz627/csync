@@ -217,6 +217,25 @@ const SHEETS = {
       acts: btn('Not now', 'back', 'close-sheet') + btn('Start', 'screen', 'cast-screen', '', 'tonal') });
   },
 
+  covers(S) {
+    const f = S.framing[S.cover] || { fit: 'Cover', rotate: 0, crop: 'Full' }, at = Math.max(0, COVERS.indexOf(S.cover));
+    return sheet({ title: 'Cover image', sub: `${S.cover}, shown when nothing is playing`, body:
+      framedPicture(COVER_ART[at] || COVER_ART[0], f, ['screen', 'On the Pi screen']) +
+      coverGrid(COVERS, COVER_ART, S.cover, 'cover') +
+      labelled('Fit', seg([['Cover', 'expand'], ['Contain', 'fit'], ['Stretch', 'screen']], f.fit, 'frame-fit', 'Fit')) +
+      labelled('Crop', seg([['Full', 'image'], ['Center', 'crop'], ['Top', 'up']], f.crop, 'frame-crop', 'Crop'), 'The image file is never changed.') +
+      group(row({ icon: 'rotate', title: 'Rotate', value: `${f.rotate}°`, act: 'frame-turn' })) +
+      btns(btn('Add an image', 'plus', 'toast', 'Choose an image from this phone'), btn('Clear framing', 'refresh', 'frame-clear', '', 'quiet')) });
+  },
+
+  display(S) {
+    const now = DISPLAYS.find(d => d.name === S.display);
+    return sheet({ title: 'Display', sub: 'What the Pi is plugged into', body:
+      group(DISPLAYS.map(d => row({ icon: 'screen', title: d.name, sub: d.connected ? `${d.size}, ${d.port}` : `Last seen ${d.seen}`, picked: d.name === S.display, off: !d.connected, act: 'pick-display', arg: d.name })).join('')) +
+      facts([['Picture', now.size], ['Turned', `${now.rotate}°`], ['Sound', now.sound], ['Starts', now.volume === 0 ? 'Muted' : `At ${now.volume}%`]]) +
+      noteLine('info', 'Each display keeps its own size, turn, sound and cover framing. A new one appears here when it is plugged in.') });
+  },
+
   slideshow(S) {
     const folders = Object.entries(LIBRARY).map(([name, items]) => [name || 'Top level', items.filter(i => i.kind === 'image').length]).filter(([, n]) => n);
     return sheet({ title: 'Photos as a slideshow', sub: `From ${S.source}`, body: group(folders.map(([name, n]) =>

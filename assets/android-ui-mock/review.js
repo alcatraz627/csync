@@ -27,9 +27,8 @@ const PLACE_SHEETS = {
   home: ['resume|0', 'device|Raspberry Pi', 'device|work-macbook'],
   search: [],
   media: ['item|Walk in the hills', 'item|Desk at sunset', 'item|Projector manual', 'folder|Films', 'details|Walk in the hills', 'view|image|Desk at sunset', 'to-device|video|Walk in the hills', 'to-chat|video|Walk in the hills', 'to-note|video|Walk in the hills', 'share-out|Walk in the hills', 'source', 'resume|1'],
-  'pi-screen': ['youtube', 'cast|screen', 'cast|app', 'slideshow', 'show-note', 'volume|Pi screen', 'speed|Pi screen', 'skip|Pi screen', 'move|Pi screen', 'replace|Pi screen|Walk in the hills'],
+  'pi-screen': ['covers', 'display', 'youtube', 'cast|screen', 'cast|app', 'slideshow', 'show-note', 'volume|Pi screen', 'speed|Pi screen', 'skip|Pi screen', 'move|Pi screen', 'replace|Pi screen|Walk in the hills'],
   'phone-player': ['move|This phone'],
-  covers: [],
   share: ['recipient', 'attach', 'clipboard', 'sent|0'],
   received: ['received|0', 'received|1', 'received|2'],
   incoming: ['to-device|link|F-Droid 2.0, the biggest update in years'],
@@ -40,16 +39,14 @@ const PLACE_SHEETS = {
   notes: [], note: ['share-note', 'note-item|0', 'note-add', 'drop-note-item|0', 'delete-note'], pin: ['share-pin', 'delete-pin'],
   tools: ['power', 'service|media', 'update'],
   process: ['app|Chrome', 'stop-app|Chrome'],
-  widgets: ['widget|xkcd', 'widget|Media remote', 'widget|Send to Pi screen'], settings: [], connection: ['device|studio-mac', 'forget|studio-mac'],
-  playback: ['start-volume', 'skip|default'],
-  assistant: ['model|default'],
-  appearance: ['custom'], guide: ['tools'], help: [], showcase: []
+  widgets: ['widget|xkcd', 'widget|Media remote', 'widget|Send to Pi screen'], settings: ['start-volume', 'skip|default', 'model|default', 'custom'], connection: ['device|studio-mac', 'forget|studio-mac'],
+  guide: ['tools'], help: [], showcase: []
 };
 const NEEDS_SESSION = { 'pi-screen': 'Pi screen', 'phone-player': 'This phone' };
 
 const sheetName = spec => {
   const [type, ...rest] = spec.split('|');
-  const names = { item: 'Item', folder: 'Folder', details: 'File details', source: 'Choose a source', resume: 'Resume', device: 'Device', recipient: 'Send to', attach: 'Attach a file', clipboard: 'Clipboard', sent: 'A sent item', received: 'A received item', 'to-chat': 'Send to a conversation', youtube: 'YouTube link', volume: 'Volume', speed: 'Speed', skip: 'Skip length', move: 'Move output', replace: 'Replace playback', 'chat-add': 'Add to message', model: 'Model and thinking', fork: 'Fork', result: 'Assistant result', capture: 'Capture', 'delete-capture': 'Delete capture', 'share-note': 'Send note', 'delete-note': 'Delete note', 'share-pin': 'Send pin', 'delete-pin': 'Delete pin', power: 'Power', service: 'Service', update: 'Update', app: 'App', 'stop-app': 'Stop app', 'start-volume': 'Starting volume', custom: 'Own colour', 'to-device': 'Send to a device', tools: 'Assistant tools', widget: 'Widget', forget: 'Forget device', view: 'Open an item', 'to-note': 'Add to a note', 'share-out': 'Android share menu', cast: 'Show this phone', slideshow: 'Slideshow', 'show-note': 'Show a note', 'export-chat': 'Save the conversation', 'note-item': 'Item in a note', 'note-add': 'Add to a note, from the note', 'drop-note-item': 'Take out of a note' };
+  const names = { item: 'Item', folder: 'Folder', details: 'File details', source: 'Choose a source', resume: 'Resume', device: 'Device', recipient: 'Send to', attach: 'Attach a file', clipboard: 'Clipboard', sent: 'A sent item', received: 'A received item', 'to-chat': 'Send to a conversation', youtube: 'YouTube link', volume: 'Volume', speed: 'Speed', skip: 'Skip length', move: 'Move output', replace: 'Replace playback', 'chat-add': 'Add to message', model: 'Model and thinking', fork: 'Fork', result: 'Assistant result', capture: 'Capture', 'delete-capture': 'Delete capture', 'share-note': 'Send note', 'delete-note': 'Delete note', 'share-pin': 'Send pin', 'delete-pin': 'Delete pin', power: 'Power', service: 'Service', update: 'Update', app: 'App', 'stop-app': 'Stop app', 'start-volume': 'Starting volume', custom: 'Own colour', 'to-device': 'Send to a device', tools: 'Assistant tools', widget: 'Widget', forget: 'Forget device', view: 'Open an item', covers: 'Cover image', display: 'Display', 'to-note': 'Add to a note', 'share-out': 'Android share menu', cast: 'Show this phone', slideshow: 'Slideshow', 'show-note': 'Show a note', 'export-chat': 'Save the conversation', 'note-item': 'Item in a note', 'note-add': 'Add to a note, from the note', 'drop-note-item': 'Take out of a note' };
   const detail = rest.filter(r => !/^\d+$/.test(r) && !['Pi screen', 'This phone', 'default', 'chat', 'video', 'image', 'link', 'text', 'doc', 'screen'].includes(r))[0];
   return names[type] + (detail ? `: ${detail}` : rest[0] && ['default', 'chat'].includes(rest[0]) ? `, ${rest[0]}` : '');
 };
@@ -77,7 +74,7 @@ const CHANGES = {
   tools: ['The heading states the worst current state.', 'No planned features listed. No second door into Media.', 'The update is here, where the owner looks for it (PI-07).'],
   process: ['Without Shizuku the page says so and shows no empty tiles (T-06).', 'Stopping an app asks first (T-03).'],
   widgets: ['Each widget and tile opens a detail with Add or Remove (T-07).', 'Native shows a row only once that widget is built (T-06).'],
-  settings: ['Four rows, each showing its current value.'],
+  settings: ['One page. Playback, Assistant and Appearance are folding groups on it, and only Connection keeps a page of its own (owner, 2026-09-30).'],
   connection: ['Devices first, connection details after, Save at the end.', 'Plain names for the fields, each with one line of help.'],
   playback: ['New. Defaults that the player and incoming shares start from.'],
   assistant: ['Model and thinking are chosen in one sheet, the same one Chat uses.', 'A provider the Pi cannot run is visibly unavailable (SE-18).'],
@@ -107,7 +104,6 @@ function renderInspector() {
 function renderTop() {
   for (const b of document.querySelectorAll('[data-theme-set]')) b.classList.toggle('on', b.dataset.themeSet === S.theme);
   for (const b of document.querySelectorAll('[data-size-set]')) b.classList.toggle('on', b.dataset.sizeSet === S.size);
-  for (const b of document.querySelectorAll('[data-tabs-set]')) b.classList.toggle('on', b.dataset.tabsSet === S.tabs);
   document.querySelector('#system-toggle').classList.toggle('on', reviewState.system);
   document.querySelector('#wall-toggle').classList.toggle('on', reviewState.wall);
   document.querySelector('#wall-toggle').textContent = reviewState.wall ? 'Back to one screen' : 'Show every screen';
@@ -175,17 +171,18 @@ function frames() {
   add('More', 'Tools, end of the page', 'tools', () => {}, true);
   add('More', 'Connection, end of the page', 'connection', () => {}, true);
   add('More', 'Connection, Pi offline', 'connection', s => { s.pi = 'offline'; });
-  add('More', 'Covers, framed', 'covers', s => { s.framing = { 'Desk at sunset': { fit: 'Contain', rotate: 90, crop: 'Full' } }; });
+  add('Media', 'Sheet: Cover image, framed', 'pi-screen', s => { s.framing = { 'Desk at sunset': { fit: 'Contain', rotate: 90, crop: 'Full' } }; s.sheet = { type: 'covers', arg: '' }; });
+  add('More', 'Settings, end of the page', 'settings', () => {}, true);
   add('More', 'Tools, Pi offline', 'tools', s => { s.pi = 'offline'; });
   add('More', 'Sheet: Power, low', 'tools', s => { s.power = 'low'; s.sheet = { type: 'power', arg: '' }; });
   add('More', 'Process monitor, Shizuku running', 'process', s => { s.shizuku = true; });
-  add('More', 'Appearance, large text', 'appearance', s => { s.size = 'lg'; });
+  add('More', 'Settings, large text', 'settings', s => { s.size = 'lg'; });
   return list;
 }
 
 function frameState(f) {
   const s = freshState();
-  Object.assign(s, { theme: S.theme, size: S.size, accent: S.accent, custom: S.custom, tabs: S.tabs, place: f.place });
+  Object.assign(s, { theme: S.theme, size: S.size, accent: S.accent, custom: S.custom, place: f.place });
   f.change(s);
   return s;
 }
@@ -220,9 +217,8 @@ function renderReview() {
 }
 
 document.addEventListener('click', event => {
-  const t = event.target.closest('[data-go],[data-state],[data-sheet],[data-theme-set],[data-size-set],[data-tabs-set],[data-frame],#wall-toggle,#system-toggle,#reset');
+  const t = event.target.closest('[data-go],[data-state],[data-sheet],[data-theme-set],[data-size-set],[data-frame],#wall-toggle,#system-toggle,#reset');
   if (!t || phone.contains(t)) return;
-  if (t.dataset.tabsSet) { S.tabs = t.dataset.tabsSet; return render(); }
   if (t.id === 'system-toggle') { reviewState.system = !reviewState.system; reviewState.wall = false; return render(); }
   if (t.dataset.go) return go(t.dataset.go);
   if (t.dataset.state) { STATES[t.dataset.state][2](S); return render(); }

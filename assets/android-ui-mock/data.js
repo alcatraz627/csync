@@ -154,6 +154,12 @@ const CAPTURES = [
     { id: 'c4', kind: 'Photo', when: '8:43 PM', size: '14 kB' } ] }
 ];
 
+// The Pi drives whichever display is plugged in. Each is named, and keeps its own tuning.
+const DISPLAYS = [
+  { name: 'Desk monitor', connected: true, port: 'HDMI 1', size: '1920 by 1080', rotate: 0, sound: 'Through the display', volume: 0 },
+  { name: 'Projector', connected: false, seen: 'Sunday', port: 'HDMI 1', size: '1280 by 720', rotate: 0, sound: 'Through the Pi headphone jack', volume: 40 }
+];
+
 const COVERS = ['Desk at sunset', 'Mountain light', 'Blueprint', 'Harbour at night'];
 const COVER_ART = ['linear-gradient(160deg,#6b4a2f,#a8683a 45%,#2f3d52)', 'linear-gradient(160deg,#35506b,#8aa6b8 50%,#e8d9c0)', 'linear-gradient(160deg,#10294a,#2768b2 60%,#0e1d33)', 'linear-gradient(160deg,#0d1422,#2a3550 55%,#c98a3a)'];
 

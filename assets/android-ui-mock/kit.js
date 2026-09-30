@@ -164,6 +164,17 @@ const card = html => `<div class="card">${html}</div>`;
 const noteLine = (symbols, text) => `<p class="note-line">${[].concat(symbols).map(s => icon(s, 14)).join('')}${esc(text)}</p>`;
 const defs = pairs => `<div class="group defs">${pairs.map(([name, does]) => `<p><b>${esc(name)}</b><span>: ${esc(does)}</span></p>`).join('')}</div>`;
 
+/**
+ * Where you are inside something that is browsed in place, such as a drive.
+ * steps: [label, act, arg, icon]. Every step but the last is tappable and goes there.
+ */
+function pathLine(steps) {
+  return `<nav class="path" aria-label="Folder path">${steps.map(([label, act, arg, symbol], i) => {
+    const last = i === steps.length - 1, inner = `${icon(symbol, 15)}<span>${esc(label)}</span>`;
+    return (i ? `<span class="sep" aria-hidden="true">/</span>` : '') + (last ? `<span class="path-step now">${inner}</span>` : `<button type="button" class="path-step" ${on(act, arg)} aria-label="Go to ${esc(label)}">${inner}</button>`);
+  }).join('')}</nav>`;
+}
+
 /** Where a picture or a video goes. mode: live, idle or nothing; tag: [icon, words]. */
 function picture(o = {}) {
   const cls = ['picture', o.mode, o.loading && 'loading'].filter(Boolean).join(' ');

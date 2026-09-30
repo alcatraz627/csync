@@ -92,6 +92,20 @@ unless they start with a slash. Ledger ids refer to
 | E4 | PI-06: whether the Pi assistant may edit its own code | **Owner.** Not an interface question. The mock shows no such control. Default until ruled: no. |
 | E5 | O-07, O-08: whether a Cast-capable HDMI device is acceptable | **Owner.** A hardware purchase. The mock offers Pi screen, This phone and Open in VLC, and no Cast row. |
 
+## E2. The owner's rulings of 2026-09-30, after reviewing the mock
+
+Answered on the decision page `csync-final-look`. The owner's answer string
+was `D1b D2b D3a D4a D5a`, with one note on D5.
+
+| # | Question | Ruling |
+|---|---|---|
+| R1 | Which tab style | **Owner.** The underline. One style everywhere; the other three variants are removed from the mock. |
+| R2 | Settings: four pages or one | **Owner.** One Settings page. Playback, Assistant and Appearance are folding groups on it. Connection keeps its own page because it is the long one with Save. |
+| R3 | Where else depth comes out | **Owner.** Covers is a sheet on the Pi screen page. Design system sits beside Help under More. File browsing shows a tappable path line in place of the Up row. Tools and Notes keep their children. |
+| R4 | Which screens keep a filled button | **Owner.** As in the mock: filled only for Send, Save, Install and Create. `runChecks()` enforces it. |
+| R5 | Showing this phone's screen or one app on the Pi screen | **Owner.** Build it, then test and fix once the Pi has proper power. In the owner's words: "pi needs to be fixed; we can build all and then test and fix it". Its delay is still unmeasured, so it ships marked as untested until then. |
+| R6 | More than one display | **Owner.** "this pi display is just one, I also have a projector I want it tuned for, or later some other screen or monitor; ensure the architecture and discovery can handle this kind of variance". The Pi reports the display that is plugged in by name. Size, turn, sound path, starting volume and cover framing are kept per display, keyed by what the display reports about itself, never by a fixed mode. The app reads the display from the Pi and never assumes one. Building and testing the second display comes later. |
+
 ## F. Records that cannot be trusted as they stand
 
 | # | Record | Problem | What to do |
