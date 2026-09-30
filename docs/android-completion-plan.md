@@ -61,8 +61,9 @@ so before it applies.
 | Mono | One colour on black, no gradient |
 
 **Splash.** An animated vector: the hub node pulses, the three links draw
-outward, the device nodes pop in, on a gradient that follows the chosen accent
-and the light or dark theme. Under one second, then a short cross-fade into
+outward, the device nodes pop in, in warm orange through violet on a fixed deep
+background. It does not follow the chosen accent: Android draws the splash
+before the app can read its settings. Under one second, then a short fade into
 Home. On Android 11 and older the static icon stays, since the animated splash
 needs Android 12.
 
