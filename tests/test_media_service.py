@@ -332,6 +332,75 @@ class MediaServiceTest(unittest.TestCase):
         with self.state._db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM note_files").fetchone()[0], 0)
 
+    def test_pin_holds_one_file_until_the_pin_is_deleted(self):
+        pdf = b"%PDF-1.4 fixture" * 10
+        status, result = self.upload("/v1/pins/file?name=..%2Fboarding+pass.pdf", pdf,
+                                     {"Content-Type": "application/pdf"})
+        self.assertEqual(status, 201)
+        pin = result["pin"]
+        self.assertEqual((pin["title"], pin["url"], pin["content"], pin["file"]),
+                         ("_boarding pass.pdf", "", "", {"name": "_boarding pass.pdf", "mime": "application/pdf",
+                                                         "size": len(pdf)}))
+        kept = Path(self.tmp.name) / "pin-files"
+        self.assertEqual([p.name for p in kept.iterdir()], [pin["id"]])
+        status, data, _ = self.request("GET", "/v1/pins")
+        self.assertEqual(json.loads(data)["pins"][0]["file"]["size"], len(pdf))
+        status, data, headers = self.request("GET", "/v1/pins/" + pin["id"] + "/file")
+        self.assertEqual((status, data, headers["Content-Type"]), (200, pdf, "application/pdf"))
+        status, data, _ = self.request("GET", "/v1/pins/" + pin["id"] + "/file", headers={"X-Csync-Token": "wrong"})
+        self.assertEqual((status, json.loads(data)["code"]), (401, "AUTH_REQUIRED"))
+        # A file pin can be retitled and tagged without gaining a link or words.
+        status, data, _ = self.request("PUT", "/v1/pins/" + pin["id"],
+                                       {"title": "Flight", "tags": ["travel"], "expectedRevision": 1})
+        renamed = json.loads(data)["pin"]
+        self.assertEqual((status, renamed["title"], renamed["file"]["name"]), (200, "Flight", "_boarding pass.pdf"))
+        words = self.state.pin_create({"content": "just words"})
+        self.assertNotIn("file", words)
+        status, data, _ = self.request("GET", "/v1/pins/" + words["id"] + "/file")
+        self.assertEqual((status, json.loads(data)["code"]), (404, "FILE_NOT_FOUND"))
+        status, data, _ = self.request("PUT", "/v1/pins/" + words["id"], {"title": "Empty", "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["code"]), (400, "PIN_INVALID"))
+        with self.assertRaises(MediaError) as error:
+            self.state.pin_file_create("big.bin", "", 20 * 1024 * 1024 + 1, io.BytesIO(b""))
+        self.assertEqual(error.exception.code, "FILE_INVALID")
+        status, data, _ = self.request("DELETE", "/v1/pins/" + pin["id"], {"expectedRevision": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(list(kept.iterdir()), [])
+
+    def test_a_picture_can_be_taken_out_of_a_note(self):
+        note = self.state.note_create({"title": "Screenshots", "body": "Evidence"})
+        other = self.state.note_create({"title": "Other", "body": "Separate"})
+        first = self.state.note_image_add(note["id"], b"\x89PNG\r\n\x1a\n" + b"one")
+        second = self.state.note_image_add(note["id"], b"\x89PNG\r\n\x1a\n" + b"two")
+        route = "/v1/notes/" + note["id"] + "/images/"
+        # A picture is only removed through the note that holds it.
+        status, data, _ = self.request("DELETE", "/v1/notes/" + other["id"] + "/images/" + first["id"])
+        self.assertEqual((status, json.loads(data)["code"]), (404, "IMAGE_NOT_FOUND"))
+        status, data, _ = self.request("DELETE", route + first["id"])
+        self.assertEqual((status, json.loads(data)), (200, {"deleted": True, "id": first["id"]}))
+        self.assertEqual([image["id"] for image in self.state.note_images(note["id"])], [second["id"]])
+        status, data, _ = self.request("DELETE", route + first["id"])
+        self.assertEqual((status, json.loads(data)["code"]), (404, "IMAGE_NOT_FOUND"))
+
+    def test_a_capture_is_deleted_by_name_and_never_while_it_records(self):
+        captures = Path(self.tmp.name) / "captures"
+        self.state.camera = Camera(captures)
+        (captures / "photo-1.jpg").write_bytes(b"jpeg")
+        (captures / "video-1.mjpeg").write_bytes(b"raw")
+        (Path(self.tmp.name) / "outside.jpg").write_bytes(b"keep")
+        self.state.camera.record_path = captures / "video-1.mjpeg"
+        status, data, _ = self.request("DELETE", "/v1/camera/captures/video-1.mjpeg")
+        self.assertEqual((status, json.loads(data)["code"]), (409, "RECORDING_ACTIVE"))
+        self.assertTrue((captures / "video-1.mjpeg").exists())
+        status, data, _ = self.request("DELETE", "/v1/camera/captures/..%2Foutside.jpg")
+        self.assertEqual(status, 404)
+        self.assertTrue((Path(self.tmp.name) / "outside.jpg").exists())
+        status, data, _ = self.request("DELETE", "/v1/camera/captures/photo-1.jpg")
+        self.assertEqual((status, json.loads(data)), (200, {"deleted": True, "name": "photo-1.jpg"}))
+        self.assertEqual([p.name for p in captures.iterdir()], ["video-1.mjpeg"])
+        status, data, _ = self.request("DELETE", "/v1/camera/captures/photo-1.jpg")
+        self.assertEqual((status, json.loads(data)["code"]), (404, "CAPTURE_UNKNOWN"))
+
     @staticmethod
     def edid(name, serial, maker="ACR", product=0x1234):
         data = bytearray(128)
@@ -508,6 +577,7 @@ class MediaServiceTest(unittest.TestCase):
             player = json.loads(data)["player"]
             self.assertEqual((status, player["state"]), (200, "idle"))
             self.assertNotIn("kind", player)
+            self.assertNotIn("name", player)
             self.assertEqual(len(self.overlays(mpv, "none")), 1)
         self.assertEqual(self.state.wallpaper.read_bytes(), b"cover")
 

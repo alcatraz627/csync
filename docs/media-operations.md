@@ -34,6 +34,10 @@ These routes use the same `X-Csync-Token` header as the rest of the media API. E
 | `GET /v1/notes/{id}/files` and `GET /v1/notes/{id}` | List a note's files. A single note now also carries a `files` list; `images` and its routes are unchanged. |
 | `GET /v1/notes/{id}/files/{fileId}` | Downloads a file with its stored type and an `attachment` filename. |
 | `DELETE /v1/notes/{id}/files/{fileId}` | Takes a file out of a note. Deleting the note removes all of its files. |
+| `DELETE /v1/notes/{id}/images/{imageId}` | Takes a picture out of a note. It answers 404 `IMAGE_NOT_FOUND` when the picture belongs to another note. |
+| `POST /v1/pins/file?name=` | Pins one file of up to 20 MB. The body is the raw file. The pin is titled with the file's name and carries `file: {"name", "mime", "size"}`. It can be retitled, tagged and described like any pin, without a link or words. |
+| `GET /v1/pins/{id}/file` | Downloads a pin's file. A pin without one answers 404 `FILE_NOT_FOUND`. Deleting the pin removes the file. |
+| `DELETE /v1/camera/captures/{name}` | Deletes one saved photo or recording. The recording in progress answers 409 `RECORDING_ACTIVE`. |
 | `GET /v1/displays` | Lists every screen the Pi has seen, plugged in or not, with its settings, and `current` for the one in use. |
 | `PUT /v1/displays/{id}` with `{"name"?, "settings"?}` | Saves a name and any of `rotate` (0, 90, 180, 270), `startVolume` (0 to 100) and `sound` (`display`, `headphones`). Returns `{"display": {...}}`. |
 
@@ -41,7 +45,7 @@ Show and slideshow return `{"shown": true, "sentToDisplay", "player"}`. While so
 
 A screen's id comes from its EDID maker, model and serial (`edid-…`). A screen without EDID, like HDMI0 today, is keyed by its port and first listed mode (`port-HDMI-A-1-1920x1080`). A screen seen for the first time keeps the old playback defaults of volume 0 and no rotation. Playback, shown pictures and slideshows use the rotation of the screen in use, and playback starts at its volume. The `sound` setting is stored but not applied yet, because the service has no way to choose an audio device.
 
-Note files are stored under `/home/alcatraz627/.local/state/csync/note-files/<note id>/`, named by file id. Shown pictures are `display-show.<ext>` and the text background is `display-blank.png` in the same state folder.
+Note files are stored under `/home/alcatraz627/.local/state/csync/note-files/<note id>/`, named by file id. A pin's file is `pin-files/<pin id>` in the same state folder. Once nothing is showing, the idle player state no longer carries the name of what was shown. Shown pictures are `display-show.<ext>` and the text background is `display-blank.png` in the same state folder.
 
 ## Check a report of no video
 

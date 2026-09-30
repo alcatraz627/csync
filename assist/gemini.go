@@ -324,6 +324,11 @@ func listGeminiChatModels(key string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return geminiChatModels(raw)
+}
+
+// geminiChatModels picks the chat models out of Gemini's own model list.
+func geminiChatModels(raw string) ([]string, error) {
 	var list struct {
 		Models []struct {
 			Name    string   `json:"name"`
@@ -349,7 +354,8 @@ func listGeminiChatModels(key string) ([]string, error) {
 	return ids, nil
 }
 
-var geminiNotChat = regexp.MustCompile(`embedding|tts|image|audio|live|robotics|computer-use|transcribe|customtools`)
+// The omni models list generateContent but only answer on the Interactions API, which this assistant does not speak.
+var geminiNotChat = regexp.MustCompile(`embedding|tts|image|audio|live|robotics|computer-use|transcribe|customtools|omni`)
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

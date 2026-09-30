@@ -73,6 +73,7 @@ class State:
         self.camera = camera
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
+        self.pin_files_root = database.parent / "pin-files"
         self.drm_root = Path("/sys/class/drm")
         # The title and text on screen and the OSD size they were laid out for,
         # kept so a rotation can redraw them.
@@ -118,6 +119,11 @@ class State:
                 db.execute("ALTER TABLE pins ADD COLUMN content TEXT NOT NULL DEFAULT ''")
             if "tags" not in pin_columns:
                 db.execute("ALTER TABLE pins ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+            # A pin can hold one file instead of a link or words. It lives on disk under the pin's id.
+            if "file_name" not in pin_columns:
+                db.execute("ALTER TABLE pins ADD COLUMN file_name TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE pins ADD COLUMN file_mime TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE pins ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
             # A note's other files live on disk, one folder per note, named by
             # their id; the name the phone sent is kept only as a label.
             db.execute("""CREATE TABLE IF NOT EXISTS note_files (
@@ -221,8 +227,9 @@ class State:
     def note_files(self, note_id: str) -> list[dict]:
         return self.note_get(note_id)["files"]
 
-    def note_file_add(self, note_id: str, name: str, content_type: str, length: int, source) -> dict:
-        """Keep any file up to 20 MB with a note, streamed to disk and checked for length."""
+    @staticmethod
+    def _upload_label(name: str, content_type: str, length: int) -> tuple[str, str]:
+        """The name and type an uploaded file is kept under. The name is a label and never a path."""
         if not isinstance(length, int) or not 1 <= length <= NOTE_FILE_LIMIT:
             raise MediaError("FILE_INVALID", "Choose a file of up to 20 MB")
         clean = re.sub(r"[/\\\x00-\x1f\x7f]", "_", name or "").strip(" .")[:240]
@@ -232,14 +239,16 @@ class State:
         if not re.fullmatch(r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}", mime) or \
                 mime == "application/octet-stream":
             mime = mimetypes.guess_type(clean)[0] or "application/octet-stream"
-        self.note_get(note_id)
-        folder = self._note_folder(note_id)
-        file_id, now = str(uuid.uuid4()), int(time.time())
+        return clean, mime
+
+    @staticmethod
+    def _store_upload(folder: Path, file_id: str, length: int, source) -> Path:
+        """Stream an upload to disk under its id, whole or not at all."""
         candidate, final = folder / f".{file_id}.upload", folder / file_id
         try:
             folder.mkdir(mode=0o700, parents=True, exist_ok=True)
             if folder.is_symlink() or not folder.is_dir():
-                raise OSError("note folder is not a directory")
+                raise OSError("upload folder is not a directory")
             flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
             with os.fdopen(os.open(candidate, flags, 0o600), "wb") as output:
                 remaining = length
@@ -258,6 +267,15 @@ class State:
         except MediaError:
             candidate.unlink(missing_ok=True)
             raise
+        return final
+
+    def note_file_add(self, note_id: str, name: str, content_type: str, length: int, source) -> dict:
+        """Keep any file up to 20 MB with a note, streamed to disk and checked for length."""
+        clean, mime = self._upload_label(name, content_type, length)
+        self.note_get(note_id)
+        folder = self._note_folder(note_id)
+        file_id, now = str(uuid.uuid4()), int(time.time())
+        final = self._store_upload(folder, file_id, length, source)
         with self._db() as db:
             # The note may have been deleted while the file was arriving.
             added = db.execute("INSERT INTO note_files SELECT ?,?,?,?,?,? WHERE EXISTS "
@@ -290,8 +308,10 @@ class State:
         (self._note_folder(note_id) / file_id).unlink(missing_ok=True)
         return {"deleted": True, "id": file_id}
 
+    PIN_COLUMNS = "id,title,url,description,revision,created_at,updated_at,content,tags,file_name,file_mime,file_size"
+
     @staticmethod
-    def _pin_fields(body: dict) -> tuple[str, str, str, str, list[str]]:
+    def _pin_fields(body: dict, holds_file: bool = False) -> tuple[str, str, str, str, list[str]]:
         title = body.get("title", "")
         url = body.get("url", "")
         description = body.get("description", "")
@@ -306,7 +326,7 @@ class State:
             raise MediaError("PIN_INVALID", "Use a URL or text snippet with optional title, tags, and description")
         url = url.strip()
         content = content.strip()
-        if not url and not content:
+        if not url and not content and not holds_file:
             raise MediaError("PIN_INVALID", "Add a URL or text snippet")
         if url:
             try:
@@ -328,23 +348,45 @@ class State:
 
     @staticmethod
     def _pin_row(row: tuple) -> dict:
-        return {"id": row[0], "title": row[1], "url": row[2], "description": row[3],
-                "revision": row[4], "createdAt": row[5], "updatedAt": row[6],
-                "content": row[7], "tags": json.loads(row[8])}
+        pin = {"id": row[0], "title": row[1], "url": row[2], "description": row[3],
+               "revision": row[4], "createdAt": row[5], "updatedAt": row[6],
+               "content": row[7], "tags": json.loads(row[8])}
+        if row[9]:
+            pin["file"] = {"name": row[9], "mime": row[10], "size": row[11]}
+        return pin
 
     def pins_list(self) -> list[dict]:
         with self._db() as db:
-            rows = db.execute("SELECT id,title,url,description,revision,created_at,updated_at,content,tags "
-                              "FROM pins ORDER BY updated_at DESC,id LIMIT 500").fetchall()
+            rows = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins ORDER BY updated_at DESC,id LIMIT 500").fetchall()
         return [self._pin_row(row) for row in rows]
 
     def pin_get(self, pin_id: str) -> dict:
         with self._db() as db:
-            row = db.execute("SELECT id,title,url,description,revision,created_at,updated_at,content,tags "
-                             "FROM pins WHERE id=?", (pin_id,)).fetchone()
+            row = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins WHERE id=?", (pin_id,)).fetchone()
         if row is None:
             raise MediaError("PIN_NOT_FOUND", "This pin is no longer available", 404)
         return self._pin_row(row)
+
+    def pin_file_create(self, name: str, content_type: str, length: int, source) -> dict:
+        """Pin one file of up to 20 MB. The pin is titled with the file's name and can be retitled later."""
+        clean, mime = self._upload_label(name, content_type, length)
+        pin_id, now = str(uuid.uuid4()), int(time.time())
+        self._store_upload(self.pin_files_root, pin_id, length, source)
+        with self._db() as db:
+            db.execute("INSERT INTO pins(id,title,url,description,revision,created_at,updated_at,content,tags,"
+                       "file_name,file_mime,file_size) VALUES(?,?,'','',1,?,?,'','[]',?,?,?)",
+                       (pin_id, clean[:200], now, now, clean, mime, length))
+        return self.pin_get(pin_id)
+
+    def pin_file_open(self, pin_id: str) -> tuple[dict, int]:
+        pin = self.pin_get(pin_id)
+        if "file" not in pin or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pin_id):
+            raise MediaError("FILE_NOT_FOUND", "This pin holds no file", 404)
+        try:
+            fd = os.open(self.pin_files_root / pin_id, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            raise MediaError("FILE_NOT_FOUND", "This file is no longer on the Pi", 404)
+        return pin["file"], fd
 
     def pin_create(self, body: dict) -> dict:
         title, url, description, content, tags = self._pin_fields(body)
@@ -356,7 +398,7 @@ class State:
         return self.pin_get(pin_id)
 
     def pin_update(self, pin_id: str, body: dict) -> dict:
-        title, url, description, content, tags = self._pin_fields(body)
+        title, url, description, content, tags = self._pin_fields(body, "file" in self.pin_get(pin_id))
         revision = self._pin_revision(body)
         with self._db() as db:
             changed = db.execute("UPDATE pins SET title=?,url=?,description=?,content=?,tags=?,"
@@ -375,6 +417,8 @@ class State:
         if not changed:
             self.pin_get(pin_id)
             raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pin_id):
+            (self.pin_files_root / pin_id).unlink(missing_ok=True)
         return {"deleted": True, "id": pin_id}
 
     def note_images(self, note_id: str) -> list[dict]:
@@ -400,6 +444,14 @@ class State:
         if row is None:
             raise MediaError("IMAGE_NOT_FOUND", "This note image is unavailable", 404)
         return row[0]
+
+    def note_image_delete(self, note_id: str, image_id: str) -> dict:
+        self.note_get(note_id)
+        with self._db() as db:
+            removed = db.execute("DELETE FROM note_images WHERE note_id=? AND id=?", (note_id, image_id)).rowcount
+        if not removed:
+            raise MediaError("IMAGE_NOT_FOUND", "This picture is no longer in the note", 404)
+        return {"deleted": True, "id": image_id}
 
     def _observe_displays(self) -> list[str]:
         """Remember every connected screen and return their ids, the one in use first."""
@@ -614,6 +666,8 @@ class State:
             return
         self.pi.pop("count", None)
         self.pi.pop("paused", None)
+        # The name belonged to what was shown; an idle screen has none.
+        self.pi.pop("name", None)
         self.display_text = None
         try:
             if kind == "text":
@@ -1242,7 +1296,10 @@ def handler_for(state: State, token: str):
                 self.wfile.write(data)
 
         def _note_file(self, note_id: str, file_id: str):
-            meta, fd = state.note_file_open(note_id, file_id)
+            return self._send_file(*state.note_file_open(note_id, file_id))
+
+        def _send_file(self, meta: dict, fd: int):
+            """Send a kept file as a download under its own name and type."""
             try:
                 length = os.fstat(fd).st_size
                 ascii_name = re.sub(r"[^A-Za-z0-9._ -]", "_", meta["name"]) or "file"
@@ -1348,6 +1405,8 @@ def handler_for(state: State, token: str):
                     return self._json(200, {"notes": state.notes_list(query.get("q", [""])[0])})
                 if path == "/v1/pins":
                     return self._json(200, {"pins": state.pins_list()})
+                if len(parts) == 5 and parts[1:3] == ["v1", "pins"] and parts[4] == "file":
+                    return self._send_file(*state.pin_file_open(parts[3]))
                 if path.startswith("/v1/pins/"):
                     return self._json(200, {"pin": state.pin_get(path.removeprefix("/v1/pins/"))})
                 if len(parts) == 6 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
@@ -1388,6 +1447,14 @@ def handler_for(state: State, token: str):
                     return self._json(201, {"note": state.note_create(self._body(320 * 1024))})
                 if path == "/v1/pins":
                     return self._json(201, {"pin": state.pin_create(self._body(8 * 1024))})
+                if path == "/v1/pins/file":
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError:
+                        length = 0
+                    self.connection.settimeout(30)
+                    return self._json(201, {"pin": state.pin_file_create(
+                        query.get("name", [""])[0], self.headers.get("Content-Type", ""), length, self.rfile)})
                 if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "images":
                     try:
                         length = int(self.headers.get("Content-Length", "0"))
@@ -1475,6 +1542,11 @@ def handler_for(state: State, token: str):
             elif self.command == "DELETE" and len(parts) == 6 and parts[1:3] == ["v1", "notes"] and \
                     parts[4] == "files":
                 return self._json(200, state.note_file_delete(parts[3], parts[5]))
+            elif self.command == "DELETE" and len(parts) == 6 and parts[1:3] == ["v1", "notes"] and \
+                    parts[4] == "images":
+                return self._json(200, state.note_image_delete(parts[3], parts[5]))
+            elif self.command == "DELETE" and path.startswith("/v1/camera/captures/") and state.camera:
+                return self._json(200, state.camera.delete_capture(path.rsplit("/", 1)[-1]))
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
                 note_id = path.removeprefix("/v1/notes/")
                 body = self._body(320 * 1024)

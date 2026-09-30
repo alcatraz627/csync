@@ -236,3 +236,12 @@ class Camera:
         if not path.is_file() or path.is_symlink():
             raise MediaError("CAPTURE_UNKNOWN", "Capture not found", 404)
         return path
+
+    def delete_capture(self, name: str) -> dict:
+        """Remove one saved photo or recording. The one being recorded right now is refused."""
+        with self.lock:
+            path = self.capture(name)
+            if self.record_path is not None and path == self.record_path:
+                raise MediaError("RECORDING_ACTIVE", "Stop the recording before deleting it", 409)
+            path.unlink()
+        return {"deleted": True, "name": name}
