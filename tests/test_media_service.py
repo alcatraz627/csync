@@ -125,6 +125,19 @@ class MediaServiceTest(unittest.TestCase):
         conn.close()
         return result
 
+    def test_a_folder_lists_every_file_below_it_for_saving_whole(self):
+        trip = self.root / "Trip v1.2"
+        (trip / "Day 1").mkdir(parents=True)
+        (trip / "a.jpg").write_bytes(b"a" * 10)
+        (trip / "Day 1" / "b.mp4").write_bytes(b"b" * 20)
+        (trip / "notes.txt").write_bytes(b"skip")
+        status, data, _ = self.request("GET", "/v1/items/tree?driveId=disk1&path=Trip%20v1.2")
+        self.assertEqual(status, 200)
+        tree = json.loads(data)
+        self.assertEqual(tree["name"], "Trip v1.2")
+        self.assertEqual(sorted((f["within"], f["name"]) for f in tree["files"]), [("", "a.jpg"), ("Day 1", "b.mp4")])
+        self.assertEqual((tree["totalBytes"], tree["truncated"]), (30, False))
+
     def test_a_cast_starts_playing_before_its_copy_finishes(self):
         from media.library import plays_while_incomplete
         box = lambda kind, size=16: size.to_bytes(4, "big") + kind + b"\0" * (size - 8)

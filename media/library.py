@@ -33,6 +33,11 @@ def _media_file(path: Path) -> bool:
     return not path.name.startswith(".") and path.suffix.casefold() in MEDIA_SUFFIXES
 
 
+def _servable(path: Path) -> bool:
+    """A file the Pi will hand to the phone: anything Media plays, and pictures."""
+    return _media_file(path) or (not path.name.startswith(".") and path.suffix.casefold() in IMAGE_SUFFIXES)
+
+
 class MediaError(Exception):
     """A failure the phone can show as a sentence, with a stable code to branch on.
 
@@ -378,6 +383,37 @@ class Library:
         return {"items": page, "nextOffset": offset + limit if offset + limit < len(entries) else None,
                 "total": len(entries)}
 
+    def folder_tree(self, drive_id: str, relative: str = "", limit: int = 2000) -> dict:
+        """Every file under a folder, at any depth, for saving the folder whole on the phone.
+
+        Each file carries `within`, its folder path below the one asked for, so the phone can
+        rebuild the same layout. Links are skipped as browsing skips them.
+        """
+        drive = self._drive(drive_id)
+        root = self._path(drive, relative)
+        if not root.is_dir():
+            raise MediaError("NOT_A_FOLDER", "Select a folder", 400)
+        files, total, truncated = [], 0, False
+        try:
+            for here, folders, names in os.walk(root):
+                folders[:] = sorted(d for d in folders if not (Path(here) / d).is_symlink())
+                for name in sorted(names, key=str.casefold):
+                    path = Path(here) / name
+                    if path.is_symlink() or not path.is_file() or not _servable(path):
+                        continue
+                    if len(files) >= limit:
+                        truncated = True
+                        break
+                    item = self.describe(drive, path)
+                    item["within"] = Path(here).relative_to(root).as_posix() if Path(here) != root else ""
+                    files.append(item)
+                    total += item["size"] or 0
+                if truncated:
+                    break
+        except PermissionError:
+            raise MediaError("MOUNT_UNREADABLE", "This folder cannot be read", 403)
+        return {"name": root.name or drive.label, "files": files, "totalBytes": total, "truncated": truncated}
+
     def folder_images(self, drive_id: str, relative: str = "") -> tuple[str, list[Path]]:
         """The folder's name and the pictures directly inside it, in browser order.
 
@@ -454,7 +490,7 @@ class Library:
         try:
             fd = os.open(path, flags)
             st = os.fstat(fd)
-            if not stat.S_ISREG(st.st_mode) or not _media_file(path) or _version(st) != expected or not self.mounted(drive):
+            if not stat.S_ISREG(st.st_mode) or not _servable(path) or _version(st) != expected or not self.mounted(drive):
                 os.close(fd)
                 raise MediaError("ITEM_CHANGED", "This file changed; select it again", 409)
             return self.describe(drive, path), fd

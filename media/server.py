@@ -1701,6 +1701,9 @@ def handler_for(state: State, token: str):
                 if path == "/v1/items":
                     return self._json(200, state.library.folder(query.get("driveId", [""])[0],
                         query.get("path", [""])[0], number("offset", 0)))
+                if path == "/v1/items/tree":
+                    return self._json(200, state.library.folder_tree(query.get("driveId", [""])[0],
+                        query.get("path", [""])[0]))
                 if path == "/v1/videos":
                     return self._json(200, state.library.videos(number("offset", 0)))
                 if path == "/v1/search":
