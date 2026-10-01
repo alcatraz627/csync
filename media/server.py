@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from . import displays, screen
 from .camera import Camera
+from .instagram import Instagram
 from .library import Drive, Library, MediaError
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
@@ -81,6 +82,7 @@ class State:
         self.wallpaper = database.parent / "wallpaper.jpg"
         self.note_files_root = database.parent / "note-files"
         self.pin_files_root = database.parent / "pin-files"
+        self.instagram = Instagram(database.parent)
         self.drm_root = Path("/sys/class/drm")
         # The title and text on screen and the OSD size they were laid out for,
         # kept so a rotation can redraw them.
@@ -1524,6 +1526,18 @@ def handler_for(state: State, token: str):
                     while chunk := source.read(65536):
                         self.wfile.write(chunk)
 
+        def _apk_version(self) -> dict:
+            """Which app build is staged, read from the note written beside it when it was staged."""
+            apk = state.database.parent / "csync-hub-update.apk"
+            if not apk.is_file():
+                return {"staged": False}
+            try:
+                note = json.loads(apk.with_suffix(".json").read_text())
+            except (OSError, ValueError):
+                note = {}
+            return {"staged": True, "versionCode": note.get("versionCode"),
+                    "versionName": note.get("versionName"), "size": apk.stat().st_size}
+
         def _note_image(self, note_id: str, image_id: str):
             data = state.note_image_get(note_id, image_id)
             self.send_response(200)
@@ -1709,6 +1723,14 @@ def handler_for(state: State, token: str):
                     return self._json(200, state.displays_list())
                 if path == "/v1/app/apk":
                     return self._apk()
+                if path == "/v1/app/version":
+                    return self._json(200, self._apk_version())
+                if path == "/v1/instagram/session":
+                    return self._json(200, state.instagram.session_status())
+                if path == "/v1/instagram/item":
+                    self.connection.settimeout(600)
+                    return self._send_file(*state.instagram.fetch(query.get("url", [""])[0],
+                                                                  number("index", 0)))
                 if path == "/v1/camera/status" and state.camera:
                     return self._json(200, state.camera.status())
                 if path == "/v1/camera/stream" and state.camera:
@@ -1800,6 +1822,8 @@ def handler_for(state: State, token: str):
                     return self._json(200, state.slideshow(body))
                 if path == "/v1/cast/youtube":
                     return self._json(200, state.cast_youtube(body.get("url", "")))
+                if path == "/v1/instagram/inspect":
+                    return self._json(200, state.instagram.inspect(body.get("url", "")))
                 if path == "/v1/progress":
                     return self._json(200, state.save_progress(body))
                 if path == "/v1/player/pi/commands":
@@ -1822,6 +1846,10 @@ def handler_for(state: State, token: str):
                     return self._json(200, state.camera.stop_recording())
                 if path == "/v1/camera/record/clip" and state.camera:
                     return self._json(200, state.camera.record_clip(body.get("durationSeconds", 5)))
+            elif self.command == "PUT" and path == "/v1/instagram/session":
+                return self._json(200, state.instagram.session_set(self._body(64 * 1024).get("cookies", "")))
+            elif self.command == "DELETE" and path == "/v1/instagram/session":
+                return self._json(200, state.instagram.session_clear())
             elif self.command == "PUT" and path.startswith("/v1/displays/"):
                 return self._json(200, {"display": state.display_update(
                     path.removeprefix("/v1/displays/"), self._body(4096))})

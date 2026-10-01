@@ -1253,6 +1253,81 @@ class MediaServiceTest(unittest.TestCase):
             self.assertFalse([c for c in mpv.call_args_list if isinstance(c.args[0], list)
                               and c.args[0][0] == "set_property" and c.args[0][1] in ("demuxer-lavf-format", "untimed")])
 
+    def test_instagram_inspect_fetch_and_session(self):
+        carousel = {"_type": "playlist", "uploader": "someone", "description": "two slides",
+                    "entries": [
+                        {"formats": [], "thumbnails": [{"url": "https://cdn/small.jpg", "width": 100, "height": 100},
+                                                       {"url": "https://cdn/big.jpg", "width": 1080, "height": 1350}]},
+                        {"formats": [{"vcodec": "avc1", "ext": "mp4"}], "thumbnail": "https://cdn/v.jpg"}]}
+        calls = []
+
+        def runner(args, timeout):
+            calls.append(args)
+            if "-J" in args:
+                return 0, json.dumps(carousel), ""
+            out = Path(args[args.index("-o") + 1].replace("%(ext)s", "mp4"))
+            out.write_bytes(b"video bytes")
+            return 0, "", ""
+
+        fetched = []
+
+        def downloader(url, path):
+            fetched.append(url)
+            path.write_bytes(b"picture bytes")
+
+        from media.instagram import Instagram
+        self.state.instagram = Instagram(Path(self.tmp.name), runner, downloader)
+        link = "Look https://www.instagram.com/p/ABCdef123/?igsh=xyz"
+        status, data, _ = self.request("POST", "/v1/instagram/inspect", {"url": link})
+        self.assertEqual(status, 200, data)
+        post = json.loads(data)
+        self.assertEqual([i["kind"] for i in post["items"]], ["image", "video"])
+        self.assertEqual((post["code"], post["uploader"]), ("ABCdef123", "someone"))
+        self.assertEqual(post["items"][0]["thumbnail"], "https://cdn/big.jpg")
+        query = "/v1/instagram/item?url=" + "https%3A%2F%2Fwww.instagram.com%2Fp%2FABCdef123%2F"
+        status, data, headers = self.request("GET", query + "&index=1")
+        self.assertEqual((status, data, headers["Content-Type"]), (200, b"picture bytes", "image/jpeg"))
+        self.assertEqual(fetched, ["https://cdn/big.jpg"])
+        status, data, headers = self.request("GET", query + "&index=2")
+        self.assertEqual((status, data, headers["Content-Type"]), (200, b"video bytes", "video/mp4"))
+        self.assertIn(["--playlist-items", "2"], [a[i:i + 2] for a in calls for i in range(len(a))])
+        status, _, _ = self.request("GET", query + "&index=2")
+        self.assertEqual(sum(1 for a in calls if "-J" in a), 1, "the post is looked up once and kept")
+        self.assertEqual(sum(1 for a in calls if "-o" in a), 1, "a fetched slide is served again from the cache")
+        status, data, _ = self.request("GET", query + "&index=3")
+        self.assertEqual((status, json.loads(data)["code"]), (404, "ITEM_MISSING"))
+        status, data, _ = self.request("POST", "/v1/instagram/inspect", {"url": "https://example.com/p/ABCdef123/"})
+        self.assertEqual((status, json.loads(data)["code"]), (400, "URL_INVALID"))
+
+        status, data, _ = self.request("PUT", "/v1/instagram/session", {"cookies": ".example.com\tTRUE\t/\tTRUE\t0\tsessionid\tx"})
+        self.assertEqual((status, json.loads(data)["code"]), (400, "SESSION_INVALID"))
+        cookies = ".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\tabc\n.evil.com\tTRUE\t/\tTRUE\t0\tsessionid\tzzz"
+        status, data, _ = self.request("PUT", "/v1/instagram/session", {"cookies": cookies})
+        self.assertEqual((status, json.loads(data)), (200, {"signedIn": True}))
+        kept = (Path(self.tmp.name) / "instagram-session.txt")
+        self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
+        self.assertNotIn("evil", kept.read_text())
+        self.request("POST", "/v1/instagram/inspect", {"url": "https://www.instagram.com/reel/Other12345/"})
+        self.assertEqual(calls[-1][:2], ["--cookies", str(kept)])
+        status, data, _ = self.request("DELETE", "/v1/instagram/session")
+        self.assertEqual(json.loads(data), {"signedIn": False})
+
+    def test_instagram_sign_in_wall_is_named(self):
+        from media.instagram import Instagram
+        self.state.instagram = Instagram(Path(self.tmp.name),
+                                         lambda args, timeout: (1, "", "ERROR: login required to view this post"))
+        status, data, _ = self.request("POST", "/v1/instagram/inspect", {"url": "https://www.instagram.com/p/Private99/"})
+        self.assertEqual((status, json.loads(data)["code"]), (403, "INSTAGRAM_SIGN_IN"))
+
+    def test_app_version_reads_the_staged_note(self):
+        status, data, _ = self.request("GET", "/v1/app/version")
+        self.assertEqual(json.loads(data), {"staged": False})
+        apk = Path(self.tmp.name) / "csync-hub-update.apk"
+        apk.write_bytes(b"x" * 2048)
+        apk.with_suffix(".json").write_text(json.dumps({"versionCode": 54, "versionName": "2.52"}))
+        status, data, _ = self.request("GET", "/v1/app/version")
+        self.assertEqual(json.loads(data), {"staged": True, "versionCode": 54, "versionName": "2.52", "size": 2048})
+
 
 if __name__ == "__main__":
     unittest.main()
