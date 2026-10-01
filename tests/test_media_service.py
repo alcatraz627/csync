@@ -1319,6 +1319,17 @@ class MediaServiceTest(unittest.TestCase):
         status, data, _ = self.request("POST", "/v1/instagram/inspect", {"url": "https://www.instagram.com/p/Private99/"})
         self.assertEqual((status, json.loads(data)["code"]), (403, "INSTAGRAM_SIGN_IN"))
 
+    def test_system_reading_lists_processes_busiest_first(self):
+        status, data, _ = self.request("GET", "/v1/system")
+        self.assertEqual(status, 200)
+        reading = json.loads(data)
+        processes = reading["processes"]
+        self.assertTrue(processes, "ps lists at least this test's own process")
+        self.assertTrue({"pid", "cpu", "memory", "name"} <= set(processes[0]))
+        self.assertEqual([p["cpu"] for p in processes], sorted((p["cpu"] for p in processes), reverse=True))
+        status, _, _ = self.request("GET", "/v1/system", headers={"X-Csync-Token": "wrong"})
+        self.assertEqual(status, 401)
+
     def test_app_version_reads_the_staged_note(self):
         status, data, _ = self.request("GET", "/v1/app/version")
         self.assertEqual(json.loads(data), {"staged": False})

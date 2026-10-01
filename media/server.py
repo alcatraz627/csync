@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import displays, screen
+from . import displays, screen, system
 from .camera import Camera
 from .instagram import Instagram
 from .library import Drive, Library, MediaError
@@ -1725,6 +1725,8 @@ def handler_for(state: State, token: str):
                     return self._apk()
                 if path == "/v1/app/version":
                     return self._json(200, self._apk_version())
+                if path == "/v1/system":
+                    return self._json(200, system.snapshot())
                 if path == "/v1/instagram/session":
                     return self._json(200, state.instagram.session_status())
                 if path == "/v1/instagram/item":
