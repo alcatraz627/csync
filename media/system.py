@@ -5,6 +5,8 @@ optional: a reading the machine cannot give is left out rather than guessed.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -73,9 +75,63 @@ def _processes(limit: int) -> list[dict]:
     return rows[:limit]
 
 
+def _first_line(path: str) -> str | None:
+    try:
+        return Path(path).read_text().strip("\x00\n ").splitlines()[0] or None
+    except (OSError, IndexError):
+        return None
+
+
+def _os_name() -> str | None:
+    try:
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if line.startswith("PRETTY_NAME="):
+                return line.split("=", 1)[1].strip('"') or None
+    except OSError:
+        pass
+    return None
+
+
+def about() -> dict:
+    """What the Pi is: its board, system, how long it has run, and how full its card is.
+
+    These change rarely, so the About page reads them once. Each is left out when the
+    machine cannot say.
+    """
+    facts: dict = {}
+    model = _first_line("/proc/device-tree/model")
+    if model:
+        facts["model"] = model
+    name = _os_name()
+    if name:
+        facts["os"] = name
+    try:
+        facts["kernel"] = os.uname().release
+        facts["hostname"] = os.uname().nodename
+    except OSError:
+        pass
+    uptime = _first_line("/proc/uptime")
+    if uptime:
+        try:
+            facts["uptimeSeconds"] = int(float(uptime.split()[0]))
+        except ValueError:
+            pass
+    try:
+        facts["load"] = [round(v, 2) for v in os.getloadavg()]
+    except OSError:
+        pass
+    facts["cores"] = os.cpu_count()
+    try:
+        disk = shutil.disk_usage("/")
+        facts["disk"] = {"totalBytes": disk.total, "usedBytes": disk.used}
+    except OSError:
+        pass
+    return facts
+
+
 def snapshot(limit: int = 12) -> dict:
-    """One reading of the Pi, with the busiest processes first."""
-    reading: dict = {"processes": _processes(limit)}
+    """One reading of the Pi, with the busiest processes first, and what the Pi is."""
+    reading: dict = {"processes": _processes(limit), "about": about()}
     cpu = _cpu_percent()
     if cpu is not None:
         reading["cpuPercent"] = cpu

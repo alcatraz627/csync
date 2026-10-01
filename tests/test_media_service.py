@@ -1258,7 +1258,8 @@ class MediaServiceTest(unittest.TestCase):
                     "entries": [
                         {"formats": [], "thumbnails": [{"url": "https://cdn/small.jpg", "width": 100, "height": 100},
                                                        {"url": "https://cdn/big.jpg", "width": 1080, "height": 1350}]},
-                        {"formats": [{"vcodec": "avc1", "ext": "mp4"}], "thumbnail": "https://cdn/v.jpg"}]}
+                        {"formats": [{"vcodec": "avc1", "ext": "mp4", "tbr": 1600}], "thumbnail": "https://cdn/v.jpg",
+                         "duration": 12}]}
         calls = []
 
         def runner(args, timeout):
@@ -1284,6 +1285,8 @@ class MediaServiceTest(unittest.TestCase):
         self.assertEqual([i["kind"] for i in post["items"]], ["image", "video"])
         self.assertEqual((post["code"], post["uploader"]), ("ABCdef123", "someone"))
         self.assertEqual(post["items"][0]["thumbnail"], "https://cdn/big.jpg")
+        # 1600 kbit/s for 12 s is 2.4 MB; the picture has no size to report.
+        self.assertEqual([i.get("size") for i in post["items"]], [None, 2400000])
         query = "/v1/instagram/item?url=" + "https%3A%2F%2Fwww.instagram.com%2Fp%2FABCdef123%2F"
         status, data, headers = self.request("GET", query + "&index=1")
         self.assertEqual((status, data, headers["Content-Type"]), (200, b"picture bytes", "image/jpeg"))
@@ -1327,6 +1330,10 @@ class MediaServiceTest(unittest.TestCase):
         self.assertTrue(processes, "ps lists at least this test's own process")
         self.assertTrue({"pid", "cpu", "memory", "name"} <= set(processes[0]))
         self.assertEqual([p["cpu"] for p in processes], sorted((p["cpu"] for p in processes), reverse=True))
+        about = reading["about"]
+        self.assertGreater(about["cores"], 0)
+        self.assertIn("kernel", about)
+        self.assertGreater(about["disk"]["totalBytes"], about["disk"]["usedBytes"])
         status, _, _ = self.request("GET", "/v1/system", headers={"X-Csync-Token": "wrong"})
         self.assertEqual(status, 401)
 

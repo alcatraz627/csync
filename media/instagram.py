@@ -28,6 +28,19 @@ SIGN_IN = re.compile(r"login|log in|cookies|rate.?limit|not available|private", 
 CACHE_HOURS = 6
 
 
+def _content_length(url: str) -> int | None:
+    """The size a server reports for a file without fetching it, or None when it will not say."""
+    if not url.startswith("https://"):
+        return None
+    try:
+        request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=4) as reply:
+            length = int(reply.headers.get("Content-Length") or 0)
+        return length or None
+    except (OSError, ValueError):
+        return None
+
+
 def post_code(url: str) -> tuple[str, str]:
     """The post's short code and a clean link to it, or URL_INVALID."""
     if not isinstance(url, str) or len(url) > 2048:
@@ -99,8 +112,11 @@ class Instagram:
         for index, entry in enumerate(entries or [], start=1):
             if not isinstance(entry, dict):
                 continue
-            items.append({"index": index, "kind": self._kind(entry),
-                          "thumbnail": self._best_image(entry) or ""})
+            item = {"index": index, "kind": self._kind(entry), "thumbnail": self._best_image(entry) or ""}
+            size = self._size(entry)
+            if size:
+                item["size"] = size
+            items.append(item)
         if not items:
             raise MediaError("POST_EMPTY", "That post has nothing that can be saved", 404)
         caption = (info.get("description") or (entries[0] or {}).get("description") or "").strip()
@@ -180,6 +196,29 @@ class Instagram:
         if any((f.get("vcodec") or "none") != "none" or f.get("ext") == "mp4" for f in formats):
             return "video"
         return "image"
+
+    @staticmethod
+    def _size(entry: dict) -> int | None:
+        """About how big the slide is, in bytes, or None when nothing says.
+
+        Instagram rarely reports a file size, so for a video it is worked out from the
+        best format's bitrate and the length, which is close enough to show beside it.
+        """
+        stated = entry.get("filesize") or entry.get("filesize_approx")
+        if isinstance(stated, (int, float)) and stated > 0:
+            return int(stated)
+        formats = [f for f in entry.get("formats") or [] if isinstance(f, dict)]
+        for f in formats:
+            if (f.get("filesize") or f.get("filesize_approx") or 0) > 0:
+                return int(max((f.get("filesize") or f.get("filesize_approx") or 0) for f in formats))
+        duration = entry.get("duration")
+        rates = [f.get("tbr") for f in formats if isinstance(f.get("tbr"), (int, float))]
+        if isinstance(duration, (int, float)) and duration > 0 and rates:
+            return int(max(rates) * 1000 / 8 * duration)
+        # Carousel videos often carry neither, so ask the CDN how long the best video file is.
+        video = [f for f in formats if f.get("url") and f.get("vcodec") not in (None, "none")]
+        best = max(video, key=lambda f: f.get("tbr") or 0, default=None)
+        return _content_length(best["url"]) if best else None
 
     @staticmethod
     def _best_image(entry: dict) -> str | None:

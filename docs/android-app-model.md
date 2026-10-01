@@ -63,6 +63,11 @@ Five places sit in the bottom bar. They are siblings. None of them is a child
 of Home. Every other place has exactly one parent, and that parent never
 changes with the route taken to get there (G-02).
 
+The bar carries a sixth button before them, Quick, which is not a place: it opens
+bar 1, the quick rail, upward over the bar, and a tap elsewhere closes it. The top
+left corner shows the csync icon the owner picked for the launcher, and it goes
+Home (owner, 2026-10-01).
+
 ```
 Home                           hero · Pick up · capability cards in two tiers
 ├─ Search
