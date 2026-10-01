@@ -990,6 +990,35 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(self.state.history()[0]["completed"])
 
+    def test_one_early_end_of_file_does_not_end_the_session(self):
+        # mpv said "end of file" once at 37 s of a 220 s film: the film stays, the cover stays away.
+        item = self.item()
+        self.state.mpv_socket = Path(self.tmp.name) / "mpv.sock"
+        self.state.mpv_socket.touch()
+        self.state.pi.update(itemId=item["id"], state="playing", positionMs=0,
+                             durationMs=220000, revision=1)
+        self.state.pi_session = "test-session"
+        self.state.pi_generation = 1
+        values = {"idle-active": False, "time-pos": 37.0, "duration": 220.0,
+                  "pause": False, "eof-reached": True, "volume": 0}
+        def reply(command):
+            if command[0] == "get_property":
+                return {"data": values[command[1]]}
+            return {"error": "success"}
+        with patch.object(self.state, "_mpv", side_effect=reply), \
+             patch.object(self.state, "show_wallpaper", return_value=True) as wallpaper:
+            first = self.state.pi_state()
+            self.assertEqual(first["state"], "playing")
+            wallpaper.assert_not_called()
+            # A second poll still at the end means the film really stopped short: ended, not completed.
+            second = self.state.pi_state()
+            self.assertEqual((second["state"], second["endedEarly"]), ("finished", True))
+            self.assertEqual(second["positionMs"], 37000)
+            with patch("media.server.time.sleep"):
+                self.state._track_pi(1)
+            self.assertFalse(self.state.history()[0]["completed"])
+            self.assertEqual(self.state.history()[0]["positionMs"], 37000)
+
     def test_pi_play_confirms_loaded_item_before_saving_history(self):
         item = self.item()
         self.state.mpv_socket = Path(self.tmp.name) / "mpv.sock"

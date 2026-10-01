@@ -96,6 +96,8 @@ class State:
                    "rotation": 0, "loop": False, "revision": 0}
         self.pi_session = ""
         self.pi_generation = 0
+        # Polls in a row on which mpv reported an end of file before the film's end.
+        self.pi_eof_polls = 0
         self.pi_sequence = 0
         database.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
@@ -1070,9 +1072,19 @@ class State:
                     volume = self._mpv(["get_property", "volume"]).get("data")
                     if isinstance(volume, (int, float)):
                         self.pi["volume"] = round(volume)
+                    # An end of file far from the end counts only on two polls in a row: one hiccup
+                    # once drew the cover over a playing film.
+                    duration = self.pi.get("durationMs") or 0
+                    at_end = duration and (self.pi.get("positionMs") or 0) >= duration - 2000
+                    if eof and not at_end:
+                        self.pi_eof_polls += 1
+                        eof = self.pi_eof_polls >= 2
+                    else:
+                        self.pi_eof_polls = 0
                     self.pi["state"] = "finished" if eof else "paused" if paused else "playing"
-                    if eof and self.pi.get("durationMs"):
-                        self.pi["positionMs"] = self.pi["durationMs"]
+                    self.pi["endedEarly"] = bool(eof and not at_end)
+                    if eof and duration and at_end:
+                        self.pi["positionMs"] = duration
                     self.pi["paused"] = paused
                     self.pi.pop("error", None)
             except MediaError:
@@ -1097,10 +1109,14 @@ class State:
                     return
                 state = self.pi_state()
                 try:
-                    self._save_pi_progress(state, state["state"] == "finished")
+                    # A film that stopped short is not completed: it keeps its place for Continue.
+                    self._save_pi_progress(state, state["state"] == "finished" and not state.get("endedEarly"))
                 except MediaError:
                     pass
                 if state["state"] == "finished":
+                    if state.get("endedEarly"):
+                        print(f"pi player ended early at {state.get('positionMs')} of {state.get('durationMs')} ms: "
+                              f"{state.get('name')}", flush=True)
                     try:
                         self.show_wallpaper()
                     except MediaError:
