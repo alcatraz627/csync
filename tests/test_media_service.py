@@ -125,6 +125,47 @@ class MediaServiceTest(unittest.TestCase):
         conn.close()
         return result
 
+    def test_a_cast_starts_playing_before_its_copy_finishes(self):
+        from media.library import plays_while_incomplete
+        box = lambda kind, size=16: size.to_bytes(4, "big") + kind + b"\0" * (size - 8)
+        self.assertTrue(plays_while_incomplete("a.mp4", box(b"ftyp") + box(b"moov")))
+        self.assertFalse(plays_while_incomplete("a.mp4", box(b"ftyp") + box(b"mdat")))
+        self.assertTrue(plays_while_incomplete("a.mkv", b"anything"))
+        (self.root / "shared").mkdir()
+        head = box(b"ftyp") + box(b"moov")
+        seen = []
+
+        class Trickle(io.BytesIO):
+            """Hands the bytes over a little at a time, as a phone upload does."""
+            def read(self, size=-1):
+                return super().read(min(size, 512) if size and size > 0 else 512)
+
+        self.state.library.import_media(
+            "disk1", "Clip.mp4", 4096, Trickle(head + b"m" * (4096 - len(head))),
+            on_ready=lambda drive, path: seen.append((path.name, path.stat().st_size)), ready_bytes=1024)
+        # Moved into place, still short of its full length, when playback was told to start.
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][0], "Clip.mp4")
+        self.assertLess(seen[0][1], 4096)
+        # A phone recording with its index last waits for the whole file, as before.
+        seen.clear()
+        late = box(b"ftyp") + box(b"mdat")
+        self.state.library.import_media(
+            "disk1", "Rec.mp4", 4096, Trickle(late + b"m" * (4096 - len(late))),
+            on_ready=lambda drive, path: seen.append(path.name), ready_bytes=1024)
+        self.assertEqual(seen, [])
+        # A send that stops after the early start leaves no partial file behind.
+        with self.assertRaises(MediaError):
+            self.state.library.import_media("disk1", "Cut.mp4", 4096, Trickle(head + b"m" * 2000),
+                                            on_ready=lambda drive, path: None, ready_bytes=1024)
+        self.assertFalse((self.root / "shared" / "cache" / "Cut.mp4").exists())
+        # Through the route: the Pi starts it, and says so, so the phone does not start it again.
+        with patch.object(self.state, "start_cast") as start:
+            body = head + b"m" * (9 * 1024**2)
+            status, result = self._cast("Big.mp4&play=1", body)
+        self.assertEqual((status, result["started"]), (201, True))
+        self.assertEqual(start.call_count, 1)
+
     def test_phone_file_cast_lands_in_the_cache_folder(self):
         # The owner's rules (2026-10-01, D5): copies live in a folder named cache, created when
         # missing, overwritten without asking, and emptied only by an explicit clean.

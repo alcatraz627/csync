@@ -54,6 +54,30 @@ class Drive:
     uuid: str
 
 
+def plays_while_incomplete(name: str, head: bytes) -> bool:
+    """Whether a player can start this file before all of it has arrived.
+
+    An MP4 or MOV needs its index (the moov box) before the media data, which phone cameras
+    usually write last; other containers here can start from their beginning.
+    """
+    if Path(name).suffix.casefold() not in (".mp4", ".m4v", ".mov", ".m4a"):
+        return True
+    at = 0
+    while at + 8 <= len(head):
+        size = int.from_bytes(head[at:at + 4], "big")
+        kind = head[at + 4:at + 8]
+        if kind == b"moov":
+            return True
+        if kind == b"mdat":
+            return False
+        if size == 1 and at + 16 <= len(head):
+            size = int.from_bytes(head[at + 8:at + 16], "big")
+        if size < 8:
+            return False
+        at += size
+    return False
+
+
 def _version(st: os.stat_result) -> str:
     material = f"{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"
     return hashlib.sha256(material.encode()).hexdigest()[:24]
@@ -66,7 +90,14 @@ class Library:
         self.fixture_mounts = fixture_mounts
         self.upload_lock = threading.Lock()
 
-    def import_media(self, drive_id: str, name: str, length: int, source) -> dict:
+    def import_media(self, drive_id: str, name: str, length: int, source,
+                     on_ready=None, ready_bytes: int = 8 * 1024**2) -> dict:
+        """Save a media file sent from the phone into the cache folder.
+
+        With on_ready, the file is moved into place once its first ready_bytes have arrived,
+        when its format can play while incomplete, and on_ready(drive, path) is called so
+        playback can begin while the rest is still being written.
+        """
         if not isinstance(length, int) or length < 1 or length > 16 * 1024**3:
             raise MediaError("UPLOAD_SIZE", "Choose a media file under 16 GB", 400)
         if not isinstance(name, str) or not name or len(name) > 240:
@@ -76,7 +107,7 @@ class Library:
             raise MediaError("UPLOAD_TYPE", "Choose a video or audio file", 400)
         if not self.upload_lock.acquire(blocking=False):
             raise MediaError("UPLOAD_BUSY", "Another media file is being sent to the Pi", 409)
-        candidate = None
+        candidate = partial = None
         try:
             drive = self._drive(drive_id) if drive_id else self.cache_drive()
             if drive.uuid.startswith("LABEL:"):
@@ -94,31 +125,46 @@ class Library:
             # A copy with the same name replaces the last one: the cache never asks.
             final = incoming / clean
             flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+            threshold = min(length, ready_bytes)
             try:
-                fd = os.open(candidate, flags, 0o600)
+                fd = os.open(candidate, flags, 0o644)
                 with os.fdopen(fd, "wb") as output:
-                    remaining = length
+                    remaining, written, head = length, 0, b""
                     while remaining:
                         chunk = source.read(min(65536, remaining))
                         if not chunk:
                             raise MediaError("UPLOAD_INCOMPLETE", "The phone stopped sending the media file", 409)
                         output.write(chunk)
                         remaining -= len(chunk)
+                        written += len(chunk)
+                        if len(head) < 65536:
+                            head += chunk[:65536 - len(head)]
+                        if on_ready and candidate is not None and written >= threshold and remaining \
+                                and plays_while_incomplete(clean, head):
+                            # The rename keeps this open file, so writing carries on into the moved file.
+                            output.flush()
+                            os.replace(candidate, final)
+                            candidate, partial = None, final
+                            on_ready(drive, final)
                     output.flush()
                     os.fsync(output.fileno())
                 if not self.mounted(drive):
                     raise MediaError("DRIVE_ABSENT", f"Reconnect {drive.label} and try again", 409)
-                os.replace(candidate, final)
-                candidate = None
+                if candidate is not None:
+                    os.replace(candidate, final)
+                    candidate = None
+                partial = None
                 return self.describe(drive, final)
             except (OSError, TimeoutError):
                 raise MediaError("UPLOAD_FAILED", "The Pi could not save this media file", 503)
         finally:
-            if candidate is not None:
-                try:
-                    candidate.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            # A failed send leaves nothing behind, including a file already moved in to play early.
+            for leftover in (candidate, partial):
+                if leftover is not None:
+                    try:
+                        leftover.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             self.upload_lock.release()
 
     def cache_drive(self) -> Drive:

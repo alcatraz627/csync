@@ -1129,14 +1129,35 @@ class State:
                     self.pi["revision"] += 1
                     return
 
-    def _play_pi(self, body: dict) -> dict:
+    def start_cast(self, item_id: str, path) -> None:
+        """Start a phone file on the Pi screen while it is still arriving; a failure shows as the player's state."""
+        try:
+            self._play_pi({}, cast=(item_id, str(path), Path(path).name))
+        except MediaError:
+            pass
+
+    def cast_finished(self, early_id: str, final_id: str) -> None:
+        """Once the whole file has arrived, the playing item takes the finished file's id, so progress is kept against it."""
+        with self.lock:
+            if self.pi.get("itemId") == early_id:
+                self.pi["itemId"] = final_id
+                self.pi["revision"] += 1
+
+    def _play_pi(self, body: dict, cast: tuple | None = None) -> dict:
+        """Play an item on the Pi screen.
+
+        cast is (item id, path, name) for a phone file still arriving in the cache folder; it is
+        only ever passed from inside the Pi, never from a request.
+        """
         with self.play_lock:
             with self.lock:
-                if body.get("expectedRevision") != self.pi["revision"]:
+                if cast is None and body.get("expectedRevision") != self.pi["revision"]:
                     raise MediaError("STATE_CHANGED", "Refresh player state and retry", 409)
-                item_id = str(body.get("itemId", ""))
-                youtube = bool(re.fullmatch(r"youtube:[A-Za-z0-9_-]{11}", item_id))
-                if youtube:
+                item_id = cast[0] if cast else str(body.get("itemId", ""))
+                youtube = cast is None and bool(re.fullmatch(r"youtube:[A-Za-z0-9_-]{11}", item_id))
+                if cast:
+                    path, name = cast[1], cast[2]
+                elif youtube:
                     path = "ytdl://https://www.youtube.com/watch?v=" + item_id[8:]
                     name = "YouTube " + item_id[8:]
                 else:
@@ -1777,9 +1798,20 @@ def handler_for(state: State, token: str):
                     except ValueError:
                         length = 0
                     self.connection.settimeout(30)
-                    return self._json(201, {"item": state.library.import_media(
-                        query.get("driveId", [""])[0], query.get("name", [""])[0],
-                        length, self.rfile)})
+                    started = {}
+                    on_ready = None
+                    if query.get("play", [""])[0] == "1":
+                        # The Pi starts the file itself once enough has arrived, so a long copy
+                        # does not hold the screen back; the phone then has nothing left to start.
+                        def on_ready(drive, partial):
+                            started["itemId"] = state.library.describe(drive, partial)["id"]
+                            threading.Thread(target=state.start_cast, args=(started["itemId"], partial),
+                                             daemon=True).start()
+                    item = state.library.import_media(query.get("driveId", [""])[0], query.get("name", [""])[0],
+                                                      length, self.rfile, on_ready=on_ready)
+                    if started:
+                        state.cast_finished(started["itemId"], item["id"])
+                    return self._json(201, {"item": item, "started": bool(started)})
                 if path == "/v1/cache/clean":
                     return self._json(200, state.library.clean_cache())
                 if path == "/v1/display/wallpaper":
