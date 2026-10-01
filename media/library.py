@@ -78,29 +78,21 @@ class Library:
             raise MediaError("UPLOAD_BUSY", "Another media file is being sent to the Pi", 409)
         candidate = None
         try:
-            drive = self._drive(drive_id)
+            drive = self._drive(drive_id) if drive_id else self.cache_drive()
             if drive.uuid.startswith("LABEL:"):
                 raise MediaError("UPLOAD_UNAVAILABLE", "This drive needs a confirmed identity before uploads", 409)
-            parent = self._path(drive, "shared")
-            if not parent.is_dir():
-                raise MediaError("UPLOAD_UNAVAILABLE", "The Pi shared folder is unavailable", 409)
-            incoming = parent / "csync-casts"
+            incoming = self.cache_folder(drive)
             try:
-                incoming.mkdir(mode=0o700, exist_ok=True)
-            except OSError:
-                raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cast folder cannot be created", 503)
-            try:
-                if incoming.is_symlink() or not incoming.is_dir() or incoming.stat().st_dev != drive.root.stat().st_dev:
-                    raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cast folder is not on the selected drive", 503)
                 space = os.statvfs(incoming)
             except OSError:
-                raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cast folder is unavailable", 503)
+                raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cache folder is unavailable", 503)
             reserve = 0 if self.fixture_mounts else 1024**3
             if space.f_bavail * space.f_frsize < length + reserve:
                 raise MediaError("DRIVE_FULL", "The Pi drive needs more free space for this file", 507)
             suffix = secrets.token_hex(8)
             candidate = incoming / f".incoming-{suffix}.upload"
-            final = incoming / f"cast-{suffix}-{clean}"
+            # A copy with the same name replaces the last one: the cache never asks.
+            final = incoming / clean
             flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
             try:
                 fd = os.open(candidate, flags, 0o600)
@@ -128,6 +120,58 @@ class Library:
                 except OSError:
                     pass
             self.upload_lock.release()
+
+    def cache_drive(self) -> Drive:
+        """The connected drive with the most free space, where a copy goes when none is named."""
+        best, room = None, -1
+        for drive in self.drives.values():
+            if drive.uuid.startswith("LABEL:") or not self.mounted(drive):
+                continue
+            try:
+                free = os.statvfs(drive.root).f_bavail * os.statvfs(drive.root).f_frsize
+            except OSError:
+                continue
+            if free > room:
+                best, room = drive, free
+        if best is None:
+            raise MediaError("DRIVE_ABSENT", "Connect a drive to the Pi and try again", 409)
+        return best
+
+    def cache_folder(self, drive: Drive) -> Path:
+        """The drive's cache folder: temporary copies, kept until cleaned up.
+
+        It is found by its name, shared/cache, and made again when missing, so a renamed one is
+        just an ordinary folder. Media lists it like any other folder.
+        """
+        parent = self._path(drive, "shared") if (drive.root / "shared").is_dir() else None
+        if parent is None:
+            raise MediaError("UPLOAD_UNAVAILABLE", "The Pi shared folder is unavailable", 409)
+        folder = parent / "cache"
+        try:
+            folder.mkdir(mode=0o755, exist_ok=True)
+            if folder.is_symlink() or not folder.is_dir() or folder.stat().st_dev != drive.root.stat().st_dev:
+                raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cache folder is not on the selected drive", 503)
+        except OSError:
+            raise MediaError("UPLOAD_UNAVAILABLE", "The Pi cache folder cannot be created", 503)
+        return folder
+
+    def clean_cache(self) -> dict:
+        """Empty every connected drive's cache folder. Only ever run when asked; nothing evicts on its own."""
+        removed, freed = 0, 0
+        for drive in self.drives.values():
+            if drive.uuid.startswith("LABEL:") or not self.mounted(drive) or not (drive.root / "shared" / "cache").is_dir():
+                continue
+            folder = self.cache_folder(drive)
+            for entry in folder.iterdir():
+                if entry.is_symlink() or not entry.is_file():
+                    continue
+                try:
+                    size = entry.stat().st_size
+                    entry.unlink()
+                except OSError:
+                    continue
+                removed, freed = removed + 1, freed + size
+        return {"removed": removed, "freedBytes": freed}
 
     def mounted(self, drive: Drive) -> bool:
         if not drive.root.is_dir() or drive.root.is_symlink():

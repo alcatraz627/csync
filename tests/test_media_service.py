@@ -116,31 +116,47 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(json.loads(data)["status"], "applied")
             self.assertEqual(play.call_args.args[0]["itemId"], "youtube:aqz-KE-bpKQ")
 
-    def test_phone_file_cast_streams_into_dedicated_drive_folder(self):
-        (self.root / "shared").mkdir()
-        body = b"video bytes" * 100
+    def _cast(self, name, body, drive="disk1"):
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
-        conn.request("POST", "/v1/cast/file?driveId=disk1&name=My+clip.mp4", body,
+        conn.request("POST", "/v1/cast/file?driveId=" + drive + "&name=" + name, body,
                      {"X-Csync-Token": "secret", "Content-Type": "video/mp4"})
         response = conn.getresponse()
-        self.assertEqual(response.status, 201)
-        item = json.loads(response.read())["item"]
+        result = (response.status, json.loads(response.read()))
         conn.close()
-        self.assertEqual(item["driveId"], "disk1")
-        self.assertTrue(item["relativePath"].startswith("shared/csync-casts/cast-"))
+        return result
+
+    def test_phone_file_cast_lands_in_the_cache_folder(self):
+        # The owner's rules (2026-10-01, D5): copies live in a folder named cache, created when
+        # missing, overwritten without asking, and emptied only by an explicit clean.
+        (self.root / "shared").mkdir()
+        cache = self.root / "shared" / "cache"
+        status, result = self._cast("My+clip.mp4", b"video bytes" * 100)
+        self.assertEqual(status, 201)
+        item = result["item"]
+        self.assertEqual((item["driveId"], item["relativePath"]), ("disk1", "shared/cache/My clip.mp4"))
         status, streamed, _ = self.request("GET", "/v1/items/" + item["id"] + "/stream")
-        self.assertEqual((status, streamed), (200, body))
-        self.assertEqual(len(list((self.root / "shared" / "csync-casts").iterdir())), 1)
-        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
-        conn.request("POST", "/v1/cast/file?driveId=disk1&name=script.txt", b"text",
-                     {"X-Csync-Token": "secret"})
-        response = conn.getresponse()
-        self.assertEqual((response.status, json.loads(response.read())["code"]), (400, "UPLOAD_TYPE"))
-        conn.close()
+        self.assertEqual((status, streamed), (200, b"video bytes" * 100))
+        # The same name again replaces the copy; no question, no second file.
+        status, _ = self._cast("My+clip.mp4", b"newer bytes" * 10)
+        self.assertEqual(status, 201)
+        self.assertEqual([p.name for p in cache.iterdir()], ["My clip.mp4"])
+        self.assertEqual((cache / "My clip.mp4").read_bytes(), b"newer bytes" * 10)
+        # No drive named: the Pi picks a connected one.
+        status, result = self._cast("Other.mp4", b"x" * 50, drive="")
+        self.assertEqual((status, result["item"]["driveId"]), (201, "disk1"))
+        status, result = self._cast("script.txt", b"text")
+        self.assertEqual((status, result["code"]), (400, "UPLOAD_TYPE"))
         with self.assertRaises(MediaError) as error:
             self.state.library.import_media("disk1", "part.mp4", 100, io.BytesIO(b"partial"))
         self.assertEqual(error.exception.code, "UPLOAD_INCOMPLETE")
-        self.assertEqual(len(list((self.root / "shared" / "csync-casts").iterdir())), 1)
+        self.assertEqual(sorted(p.name for p in cache.iterdir()), ["My clip.mp4", "Other.mp4"])
+        # A folder the owner renamed is an ordinary folder: clean leaves it, and a new cache appears.
+        cache.rename(self.root / "shared" / "kept")
+        self._cast("Third.mp4", b"y" * 20)
+        status, data, _ = self.request("POST", "/v1/cache/clean", {})
+        self.assertEqual((status, json.loads(data)["removed"]), (200, 1))
+        self.assertEqual(list(cache.iterdir()), [])
+        self.assertEqual(sorted(p.name for p in (self.root / "shared" / "kept").iterdir()), ["My clip.mp4", "Other.mp4"])
 
     def test_app_update_requires_token_and_serves_only_staged_regular_file(self):
         route = "/v1/app/apk"

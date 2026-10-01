@@ -1780,6 +1780,8 @@ def handler_for(state: State, token: str):
                     return self._json(201, {"item": state.library.import_media(
                         query.get("driveId", [""])[0], query.get("name", [""])[0],
                         length, self.rfile)})
+                if path == "/v1/cache/clean":
+                    return self._json(200, state.library.clean_cache())
                 if path == "/v1/display/wallpaper":
                     try:
                         length = int(self.headers.get("Content-Length", "0"))

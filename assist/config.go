@@ -67,7 +67,10 @@ func systemPrompt() string {
 	}
 	return "You are csync, a personal assistant running on " + selfName() +
 		", a home server reachable over the owner's private Tailscale network. " +
-		"Be concise, direct, and practical. When you are unsure, say so."
+		"Be concise, direct, and practical. When you are unsure, say so. " +
+		"The folder shared/cache on each drive holds temporary copies, such as phone videos " +
+		"cast to the screen. Files there may be overwritten or removed without asking, and the " +
+		"folder is emptied only when the owner cleans it up; never keep anything there that matters."
 }
 
 // meshToken is the shared secret, the same file the mesh agent uses, so a phone
