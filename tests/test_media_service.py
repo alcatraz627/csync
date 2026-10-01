@@ -1247,6 +1247,25 @@ class MediaServiceTest(unittest.TestCase):
         status, _, _ = self.request("GET", "/v1/display/wallpaper/image", headers={"X-Csync-Token": "wrong"})
         self.assertEqual(status, 401)
 
+    def test_earlier_covers_are_kept_and_can_be_set_again(self):
+        first, second = b"\xff\xd8\xff" + b"one" * 50, b"\xff\xd8\xff" + b"two" * 50
+        self.state._keep_cover(first)
+        time.sleep(0.01)
+        self.state._keep_cover(second)
+        self.state._keep_cover(second)  # the same picture twice is kept once
+        self.state.wallpaper.write_bytes(second)
+        status, data, _ = self.request("GET", "/v1/covers")
+        covers = json.loads(data)["covers"]
+        self.assertEqual((status, len(covers)), (200, 2))
+        self.assertEqual([c["current"] for c in covers], [True, False])
+        status, image, _ = self.request("GET", "/v1/covers/" + covers[1]["id"] + "/image")
+        self.assertEqual((status, image), (200, first))
+        with patch.object(self.state, "set_wallpaper", return_value={"status": "applied"}) as use:
+            status, _, _ = self.request("POST", "/v1/covers/" + covers[1]["id"] + "/use", {})
+        self.assertEqual((status, use.call_args.args[0]), (200, first))
+        status, data, _ = self.request("GET", "/v1/covers/../../x/image")
+        self.assertEqual(status, 404)
+
     def test_camera_blackholed_viewer_is_released(self):
         class BurstCamera:
             def __init__(self):

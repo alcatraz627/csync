@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -654,6 +655,33 @@ class State:
         self._mpv(["set_property", "panscan", 0.0])
         self._mpv(["set_property", "keepaspect", True])
 
+    COVERS_KEPT = 30
+
+    def _keep_cover(self, image: bytes) -> None:
+        """Keep every cover the owner has set, so an earlier one can be picked again; the newest 30 stay."""
+        folder = self.wallpaper.parent / "covers"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        kept = folder / (hashlib.sha256(image).hexdigest()[:16] + ".jpg")
+        kept.write_bytes(image)
+        os.utime(kept)
+        for old in sorted(folder.glob("*.jpg"), key=lambda p: p.stat().st_mtime_ns, reverse=True)[self.COVERS_KEPT:]:
+            old.unlink(missing_ok=True)
+
+    def covers(self) -> dict:
+        """The covers set before, newest first, with the one on screen now marked."""
+        folder = self.wallpaper.parent / "covers"
+        now = hashlib.sha256(self.wallpaper.read_bytes()).hexdigest()[:16] if self.wallpaper.is_file() else None
+        found = sorted(folder.glob("*.jpg"), key=lambda p: p.stat().st_mtime_ns, reverse=True) if folder.is_dir() else []
+        return {"covers": [{"id": p.stem, "current": p.stem == now, "addedNs": p.stat().st_mtime_ns} for p in found]}
+
+    def cover_path(self, cover_id: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{16}", cover_id or ""):
+            raise MediaError("COVER_UNKNOWN", "That cover is not kept", 404)
+        path = self.wallpaper.parent / "covers" / (cover_id + ".jpg")
+        if not path.is_file():
+            raise MediaError("COVER_UNKNOWN", "That cover is not kept", 404)
+        return path
+
     def set_wallpaper(self, image: bytes) -> dict:
         if len(image) < 100 or len(image) > 10 * 1024 * 1024 or not image.startswith(b"\xff\xd8\xff"):
             raise MediaError("IMAGE_INVALID", "Choose a JPEG image under 10 MB", 400)
@@ -675,6 +703,7 @@ class State:
             candidate.write_bytes(image)
             os.replace(candidate, self.wallpaper)
             self.wallpaper.chmod(0o600)
+            self._keep_cover(image)
             if self.pi.get("itemId"):
                 try:
                     observed = self.pi_state()
@@ -1569,10 +1598,10 @@ def handler_for(state: State, token: str):
             if self.command != "HEAD":
                 self.wfile.write(data)
 
-        def _wallpaper(self):
-            """Send the saved cover, so a phone can show what the idle screen shows."""
+        def _wallpaper(self, path=None):
+            """Send the saved cover, or a kept earlier one, so a phone can show it."""
             try:
-                data = state.wallpaper.read_bytes()
+                data = (path or state.wallpaper).read_bytes()
             except OSError:
                 raise MediaError("COVER_MISSING", "No cover image is saved on the Pi", 404)
             self.send_response(200)
@@ -1743,6 +1772,10 @@ def handler_for(state: State, token: str):
                     return self._json(200, {"stored": state.wallpaper.is_file()})
                 if path == "/v1/display/wallpaper/image":
                     return self._wallpaper()
+                if path == "/v1/covers":
+                    return self._json(200, state.covers())
+                if path.startswith("/v1/covers/") and path.endswith("/image"):
+                    return self._wallpaper(state.cover_path(path[len("/v1/covers/"):-len("/image")]))
                 if path == "/v1/displays":
                     return self._json(200, state.displays_list())
                 if path == "/v1/app/apk":
@@ -1821,6 +1854,9 @@ def handler_for(state: State, token: str):
                     return self._json(201, {"item": item, "started": bool(started)})
                 if path == "/v1/cache/clean":
                     return self._json(200, state.library.clean_cache())
+                if path.startswith("/v1/covers/") and path.endswith("/use"):
+                    kept = state.cover_path(path[len("/v1/covers/"):-len("/use")])
+                    return self._json(200, state.set_wallpaper(kept.read_bytes()))
                 if path == "/v1/display/wallpaper":
                     try:
                         length = int(self.headers.get("Content-Length", "0"))
