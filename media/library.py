@@ -91,12 +91,13 @@ class Library:
         self.upload_lock = threading.Lock()
 
     def import_media(self, drive_id: str, name: str, length: int, source,
-                     on_ready=None, ready_bytes: int = 8 * 1024**2) -> dict:
+                     on_ready=None, ready_bytes: int = 8 * 1024**2, tail_bytes: int = 0) -> dict:
         """Save a media file sent from the phone into the cache folder.
 
         With on_ready, the file is moved into place once its first ready_bytes have arrived,
         when its format can play while incomplete, and on_ready(drive, path) is called so
-        playback can begin while the rest is still being written.
+        playback can begin while the rest is still being written. With tail_bytes, the body's
+        first tail_bytes belong at the end of the file and the rest follows from its start.
         """
         if not isinstance(length, int) or length < 1 or length > 16 * 1024**3:
             raise MediaError("UPLOAD_SIZE", "Choose a media file under 16 GB", 400)
@@ -125,11 +126,28 @@ class Library:
             # A copy with the same name replaces the last one: the cache never asks.
             final = incoming / clean
             flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-            threshold = min(length, ready_bytes)
+            if not isinstance(tail_bytes, int) or tail_bytes < 0 or tail_bytes >= length:
+                raise MediaError("UPLOAD_TAIL", "The file's end was described wrongly", 400)
+            threshold = min(length - tail_bytes, ready_bytes)
             try:
                 fd = os.open(candidate, flags, 0o644)
                 with os.fdopen(fd, "wb") as output:
-                    remaining, written, head = length, 0, b""
+                    # A phone recording's index sits at its end; the phone sends that end first,
+                    # so it is in place before the start and the file can play while it arrives.
+                    tail_index = False
+                    if tail_bytes:
+                        output.seek(length - tail_bytes)
+                        left, first = tail_bytes, b""
+                        while left:
+                            chunk = source.read(min(65536, left))
+                            if not chunk:
+                                raise MediaError("UPLOAD_INCOMPLETE", "The phone stopped sending the media file", 409)
+                            output.write(chunk)
+                            first = first or chunk[:8]
+                            left -= len(chunk)
+                        tail_index = first[4:8] == b"moov"
+                        output.seek(0)
+                    remaining, written, head = length - tail_bytes, 0, b""
                     while remaining:
                         chunk = source.read(min(65536, remaining))
                         if not chunk:
@@ -140,7 +158,7 @@ class Library:
                         if len(head) < 65536:
                             head += chunk[:65536 - len(head)]
                         if on_ready and candidate is not None and written >= threshold and remaining \
-                                and plays_while_incomplete(clean, head):
+                                and (tail_index or plays_while_incomplete(clean, head)):
                             # The rename keeps this open file, so writing carries on into the moved file.
                             output.flush()
                             os.replace(candidate, final)

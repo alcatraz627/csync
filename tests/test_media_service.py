@@ -154,6 +154,14 @@ class MediaServiceTest(unittest.TestCase):
             "disk1", "Rec.mp4", 4096, Trickle(late + b"m" * (4096 - len(late))),
             on_ready=lambda drive, path: seen.append(path.name), ready_bytes=1024)
         self.assertEqual(seen, [])
+        # Sent with its end first, the same recording rebuilds byte for byte and starts early.
+        recording = late + b"m" * 3000 + box(b"moov", 64)
+        tail = recording[-64:]
+        self.state.library.import_media(
+            "disk1", "Rec2.mp4", len(recording), Trickle(tail + recording[:-64]),
+            on_ready=lambda drive, path: seen.append(path.name), ready_bytes=1024, tail_bytes=64)
+        self.assertEqual(seen, ["Rec2.mp4"])
+        self.assertEqual((self.root / "shared" / "cache" / "Rec2.mp4").read_bytes(), recording)
         # A send that stops after the early start leaves no partial file behind.
         with self.assertRaises(MediaError):
             self.state.library.import_media("disk1", "Cut.mp4", 4096, Trickle(head + b"m" * 2000),

@@ -1807,8 +1807,12 @@ def handler_for(state: State, token: str):
                             started["itemId"] = state.library.describe(drive, partial)["id"]
                             threading.Thread(target=state.start_cast, args=(started["itemId"], partial),
                                              daemon=True).start()
+                    try:
+                        tail = int(self.headers.get("X-Csync-Tail-Bytes", "0"))
+                    except ValueError:
+                        tail = -1
                     item = state.library.import_media(query.get("driveId", [""])[0], query.get("name", [""])[0],
-                                                      length, self.rfile, on_ready=on_ready)
+                                                      length, self.rfile, on_ready=on_ready, tail_bytes=tail)
                     if started:
                         state.cast_finished(started["itemId"], item["id"])
                     return self._json(201, {"item": item, "started": bool(started)})
