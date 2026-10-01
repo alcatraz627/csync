@@ -174,8 +174,8 @@ exercised.
 | 21 | Pi cold boot with USB | unproven | Only a service restart was tested | Needs a power cycle |
 | 22 | Camera error text | unknown | "Camera: null" reported in an old review, not re-checked | Check and fix |
 | 23 | Gemini image tool | not started | | Build after stream 2 |
-| 24 | Dead layouts | leftover | `page_home.xml`, `page_share.xml`, `page_more.xml`, `page_tools.xml`, `page_camera.xml` are inflated nowhere | Remove once confirmed |
-| 25 | Stale records | leftover | `ledger-status.md`, `callouts.jsonl` status | Regenerate from captures at the end |
+| 24 | Dead layouts | done | the five unused page layouts are gone | |
+| 25 | Stale records | done 2026-10-01 | `ledger-status.md` regenerated from `native-verdicts-20261001.md` (228 asks: 162 pass, 11 fail, 9 unbuilt, 46 not applicable); all 82 callouts rechecked with evidence | The 11 fails and the owner calls are listed in the verdict file |
 
 Rows 19 to 21 need something physical and cannot be finished from here. They
 stay listed as waiting on the hardware.
