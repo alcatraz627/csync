@@ -129,6 +129,37 @@ mock, and the same list is a place in the app under More, Help and about.
 with a tag, a class or a style of its own, so a screen can only be built from
 these parts.
 
+## Motion
+
+Every move between pages uses one of two animations, and which one is decided
+by where the two pages sit in the map (`docs/android-app-model.md` section 3),
+never by how a page happens to be built. A page in its own activity and a page
+swapped inside one move the same way.
+
+| The move | Animation | Example |
+|---|---|---|
+| To a direct child, or back to the parent | Shared axis: the page slides 36dp along one horizontal line as it fades in, from the right going down, from the left coming back. 260 ms | Home to Notes, Raspberry Pi to Pi camera, Back from either |
+| Anything else: to a bar place, across hierarchies, two levels at once | Fade through: the page fades in while it grows from 96 percent. 240 ms after a 40 ms pause | Home to Media, Pi page to Settings, a rail jump |
+
+Switching a view inside a page (Media's Files and Videos, Share's Sent and
+Received, Chat's All and Archived) is not a move and does not animate the page.
+The bottom bar is the app's frame: it never moves with a page.
+
+Each page then arrives in four steps, 70 ms apart, so the eye reads it in the
+order it is used:
+
+1. The page itself: its surface, rows and cards.
+2. Titles: the crumbs in the top bar and the section labels.
+3. Actions: the Back arrow, the top bar's icons, buttons and tab strips. Steps
+   two and three rise 6dp as they fade in.
+4. Status and decoration: row icons, status dots and words, end labels and
+   chevrons. These fade in place.
+
+A part keeps its own resting see-through level, so a dimmed part stays dimmed.
+`Kit.move` applies both rules; `Kit.arrive` does it for a screen of its own and
+leaves the bottom bar still. A new part joins a step by its id or by the tags
+`kit-title` and `kit-action` that `Kit.label`, `Kit.button` and `Kit.tabs` set.
+
 ## What may never appear
 
 These are checked on every screen, in both themes and all three text sizes,
