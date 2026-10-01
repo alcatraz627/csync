@@ -2,8 +2,9 @@
 # csync phone app: the app model
 
 This is the one description of how the phone app is organised. The mock, the
-design-system doc and the native app all follow it. When one of them disagrees
-with this file, this file is right and the other one has a defect.
+design-system doc and the native app all follow it. The owner's own words outrank
+it: a rule here that drops or narrows something the owner asked for needs a recorded
+owner ruling in the decisions doc.
 
 The machine-readable copy of the place map lives in
 `/Users/alcatraz627/Code/Claude/csync/assets/android-ui-mock/model.js` and the
@@ -63,8 +64,14 @@ of Home. Every other place has exactly one parent, and that parent never
 changes with the route taken to get there (G-02).
 
 ```
-Home
-└─ Search
+Home                           hero · Pick up · capability cards in two tiers
+├─ Search
+├─ Raspberry Pi                Pi screen and camera links, then each part's health
+│  └─ Pi camera
+│     └─ Captures
+└─ Notes                       views: Notes · Pins
+   ├─ Note
+   └─ Pin
 
 Media                          views: Files · Videos · History · Access
 ├─ Pi screen                   the Pi output: player, or cover when idle
@@ -74,32 +81,25 @@ Media                          views: Files · Videos · History · Access
 Share                          compose
 ├─ Received
 └─ From another app            entered from the Android share sheet
+   └─ A post from Instagram    its parts, saved one, some or all
 
 Chat                           views: All · Favorites · Archived · Tools
 └─ Conversation
 
 More
-├─ Pi camera
-│  └─ Captures
-├─ Notes                       views: Notes · Pins
-│  ├─ Note
-│  └─ Pin
-├─ Tools
-│  ├─ Process monitor
-│  └─ Widgets
+├─ Process monitor             This phone
+├─ Widgets                     This phone
 ├─ Settings
-│  ├─ Connection
-│  ├─ Playback
-│  ├─ Assistant
-│  └─ Appearance
+│  └─ Connection
 ├─ Assistant guide
 └─ Help and about
-   └─ Design system            every part the app is built from
 ```
 
-The rule that decides where a place lives: if it is not one of the five bar
-places and not a detail of one, it lives in More. Home shows shortcuts to
-places; a shortcut never changes where the place lives.
+Where a place lives is decided by what it is, not by the bar's five slots
+(owner, 2026-10-01: "the bottom drawer is limited by 5 icons"). The Raspberry
+Pi and Notes are capabilities in their own right and hang off Home; More holds
+this phone's tools, the app itself and reading. Home is the map: every
+capability has a card there, and no card repeats a bottom-bar place.
 
 The deepest place is three levels. That is a design limit, not an accident: a
 fourth level means the thing should have been a sheet or a view.
