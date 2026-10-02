@@ -1,7 +1,7 @@
-// csync's Mac notifier: shows a notification for something the mesh agent received, and
-// when it is clicked, opens the picture or text, or shows the file in Finder.
+// csync's Mac notifier: shows a notification for something the mesh agent received, with
+// buttons to open it, show it in Finder, or copy its path. A plain click does what --click says.
 //
-// Posting:  csync-notifier --title T --body B (--open PATH | --reveal PATH) [--image PATH]
+// Posting:  csync-notifier --title T --body B --path PATH [--click copy|open] [--image PATH]
 // Exit codes: 0 posted, 3 notifications not allowed, 4 posting failed, 2 bad arguments.
 // Launched with no arguments (which macOS does when a notification is clicked), it waits
 // for the click to be handed over, acts on it, and quits.
@@ -13,6 +13,11 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
     func applicationDidFinishLaunching(_ note: Notification) {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        center.setNotificationCategories([UNNotificationCategory(identifier: "csync-item", actions: [
+            UNNotificationAction(identifier: "open", title: "Open", options: [.foreground]),
+            UNNotificationAction(identifier: "reveal", title: "Show in Finder", options: [.foreground]),
+            UNNotificationAction(identifier: "copy", title: "Copy path", options: []),
+        ], intentIdentifiers: [], options: [])])
         let args = CommandLine.arguments
         if args.contains("--title") {
             post(args, center)
@@ -34,10 +39,9 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
         content.body = value(args, "--body") ?? ""
         if let subtitle = value(args, "--subtitle") { content.subtitle = subtitle }
         content.sound = .default
-        if let path = value(args, "--open") {
-            content.userInfo = ["action": "open", "path": path]
-        } else if let path = value(args, "--reveal") {
-            content.userInfo = ["action": "reveal", "path": path]
+        if let path = value(args, "--path") {
+            content.userInfo = ["path": path, "click": value(args, "--click") ?? "copy"]
+            content.categoryIdentifier = "csync-item"
         }
         // macOS moves an attachment's file into its own store, so it gets a copy, never the original.
         if let image = value(args, "--image") {
@@ -60,10 +64,15 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
         let info = response.notification.request.content.userInfo
         if let path = info["path"] as? String {
             let url = URL(fileURLWithPath: path)
-            if info["action"] as? String == "reveal" {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            } else {
-                NSWorkspace.shared.open(url)
+            var action = response.actionIdentifier
+            if action == UNNotificationDefaultActionIdentifier { action = info["click"] as? String ?? "copy" }
+            switch action {
+            case "reveal": NSWorkspace.shared.activateFileViewerSelecting([url])
+            case "open": NSWorkspace.shared.open(url)
+            case "copy":
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+            default: break
             }
         }
         done()

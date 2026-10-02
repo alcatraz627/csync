@@ -205,12 +205,14 @@ func notifyArrival(kind, from, body, dest string) {
 		notify(title, body+"\n"+arrivalHint(kind, dest, false))
 		return
 	}
-	args := []string{"--title", title, "--body", body, "--subtitle", arrivalHint(kind, dest, true)}
-	if kind == "text" || isPicture(dest) {
-		args = append(args, "--open", dest)
-	} else {
-		args = append(args, "--reveal", dest)
+	// A plain click copies the path; for text it opens it instead, since the words are
+	// already on the clipboard and copying the path would replace them.
+	click := "copy"
+	if kind == "text" {
+		click = "open"
 	}
+	args := []string{"--title", title, "--body", body, "--subtitle", arrivalHint(kind, dest, true),
+		"--path", dest, "--click", click}
 	if isPicture(dest) {
 		args = append(args, "--image", dest)
 	}
@@ -232,10 +234,8 @@ func arrivalHint(kind, dest string, clickable bool) string {
 		return "On the clipboard"
 	case !clickable:
 		return "Saved in " + dest
-	case isPicture(dest):
-		return "Click to open it"
 	default:
-		return "Click to show it in Finder"
+		return "Click to copy its path"
 	}
 }
 
