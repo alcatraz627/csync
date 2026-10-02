@@ -955,6 +955,16 @@ class State:
             self.pi["revision"] += 1
             return {"shown": True, "sentToDisplay": sent, "player": self.pi_state()}
 
+    def showing_picture(self) -> Path:
+        """The picture on the Pi screen now, so the phone can preview it."""
+        with self.lock:
+            if self.pi.get("state") != "showing" or self.pi.get("kind") != "image":
+                raise MediaError("NOTHING_SHOWING", "The Pi screen is not showing a picture", 404)
+            found = sorted(self.database.parent.glob("display-show.*"))
+        if not found:
+            raise MediaError("NOTHING_SHOWING", "The Pi screen is not showing a picture", 404)
+        return found[0]
+
     def show_image(self, image: bytes, name: str = "") -> dict:
         """Show a picture now without changing the saved cover."""
         if len(image) < 100 or len(image) > 10 * 1024 * 1024:
@@ -1605,7 +1615,7 @@ def handler_for(state: State, token: str):
             except OSError:
                 raise MediaError("COVER_MISSING", "No cover image is saved on the Pi", 404)
             self.send_response(200)
-            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Type", mimetypes.guess_type(str(path or state.wallpaper))[0] or "image/jpeg")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "private, no-store")
             self.end_headers()
@@ -1774,6 +1784,8 @@ def handler_for(state: State, token: str):
                     return self._wallpaper()
                 if path == "/v1/covers":
                     return self._json(200, state.covers())
+                if path == "/v1/display/showing/image":
+                    return self._wallpaper(state.showing_picture())
                 if path.startswith("/v1/covers/") and path.endswith("/image"):
                     return self._wallpaper(state.cover_path(path[len("/v1/covers/"):-len("/image")]))
                 if path == "/v1/displays":

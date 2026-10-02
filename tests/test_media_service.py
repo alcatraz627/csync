@@ -620,6 +620,9 @@ class MediaServiceTest(unittest.TestCase):
             mpv.assert_any_call(["loadfile", str(shown), "replace"])
             mpv.assert_any_call(["set_property", "image-display-duration", "inf"])
             self.assertEqual(json.loads(self.request("GET", "/v1/player/pi")[1])["state"], "showing")
+            # The phone can preview the picture the screen is showing.
+            status, data, headers = self.request("GET", "/v1/display/showing/image")
+            self.assertEqual((status, data, headers["Content-Type"]), (200, picture, "image/png"))
             probe.return_value.stdout = b'{"streams":[{"codec_name":"h264","width":640,"height":480}]}'
             status, result = self.upload("/v1/display/show", picture, {"Content-Type": "image/png"})
             self.assertEqual((status, result["code"]), (400, "IMAGE_INVALID"))
@@ -628,6 +631,7 @@ class MediaServiceTest(unittest.TestCase):
                                            {"title": "Dinner", "text": "Pasta at {7}, bring \\N wine"})
             result = json.loads(data)
             self.assertEqual((status, result["player"]["kind"], result["player"]["name"]), (200, "text", "Dinner"))
+            self.assertEqual(self.request("GET", "/v1/display/showing/image")[0], 404)
             blank = Path(self.tmp.name) / "display-blank.png"
             self.assertTrue(blank.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
             mpv.assert_any_call(["loadfile", str(blank), "replace"])
