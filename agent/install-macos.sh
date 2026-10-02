@@ -16,6 +16,19 @@ mkdir -p "$BIN_DIR"
 echo "building host binary -> $BIN"
 env CGO_ENABLED=0 "$GO" build -trimpath -ldflags "-s -w" -o "$BIN" .
 
+# The notifier is a tiny app bundle, since macOS lets only an app ask to send notifications.
+# Clicking one of its notifications opens what arrived; the agent finds it at this path.
+APP="$HOME/Applications/csync Notifier.app"
+if command -v swiftc >/dev/null 2>&1; then
+  echo "building notifier -> $APP"
+  mkdir -p "$APP/Contents/MacOS"
+  cp -f notifier/Info.plist "$APP/Contents/Info.plist"
+  swiftc -O -o "$APP/Contents/MacOS/csync-notifier" notifier/main.swift
+  codesign --force --sign - "$APP"
+else
+  echo "swiftc not found: notifications will not open what arrived"
+fi
+
 # Mint the token now so the service starts with one already in place.
 "$BIN" token >/dev/null
 

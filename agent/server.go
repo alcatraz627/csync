@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,19 +205,19 @@ func notifyArrival(kind, from, body, dest string) {
 		notify(title, body+"\n"+arrivalHint(kind, dest, false))
 		return
 	}
-	args := []string{"-title", title, "-message", body, "-subtitle", arrivalHint(kind, dest, true), "-group", "csync-" + filepath.Base(dest)}
-	switch {
-	case kind == "text" || isPicture(dest):
-		args = append(args, "-open", (&url.URL{Scheme: "file", Path: dest}).String())
-		if isPicture(dest) {
-			args = append(args, "-contentImage", dest)
-		}
-	default:
-		args = append(args, "-execute", "/usr/bin/open -R "+shellQuote(dest))
+	args := []string{"--title", title, "--body", body, "--subtitle", arrivalHint(kind, dest, true)}
+	if kind == "text" || isPicture(dest) {
+		args = append(args, "--open", dest)
+	} else {
+		args = append(args, "--reveal", dest)
 	}
-	// Without notification permission terminal-notifier exits non-zero; the plain
+	if isPicture(dest) {
+		args = append(args, "--image", dest)
+	}
+	// Until notifications are allowed for csync the notifier exits non-zero; the plain
 	// notification then at least says where the item is.
 	if err := exec.Command(notifier, args...).Run(); err != nil {
+		log.Printf("notifier: %v", err)
 		notify(title, body+"\n"+arrivalHint(kind, dest, false))
 	}
 }
@@ -248,23 +247,15 @@ func isPicture(path string) bool {
 	return false
 }
 
-// findNotifier locates terminal-notifier, which can act on a click. A service
-// started by launchd often lacks Homebrew on its PATH, so the usual places are
-// checked as well.
+// findNotifier locates csync's notifier app, which install-macos.sh builds and
+// which can act on a click.
 func findNotifier() string {
-	if p, err := exec.LookPath("terminal-notifier"); err == nil {
+	home, _ := os.UserHomeDir()
+	p := filepath.Join(home, "Applications", "csync Notifier.app", "Contents", "MacOS", "csync-notifier")
+	if _, err := os.Stat(p); err == nil {
 		return p
 	}
-	for _, p := range []string{"/opt/homebrew/bin/terminal-notifier", "/usr/local/bin/terminal-notifier"} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
 	return ""
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // notify raises a native desktop notification, best-effort per platform.
