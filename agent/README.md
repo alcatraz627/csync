@@ -49,7 +49,12 @@ csync-agent token                          # print/mint the shared token
 | POST | `/send` | `X-Csync-Token`, `X-Csync-From`, `X-Csync-Kind` (text/file/image), `X-Csync-Name`; raw body | saved to `~/csync/inbox/<from>/`; receipt JSON |
 
 Received text is copied to the clipboard on macOS. Every arrival raises a
-desktop notification.
+desktop notification. On a Mac, `install-macos.sh` also builds
+`~/Applications/csync Notifier.app`, whose notifications carry Open, Show in
+Finder and Copy path; a click copies the path (for text it opens it, since the
+words are already on the clipboard). macOS asks once whether csync may send
+notifications. Without that permission, or without the app, the agent falls
+back to a plain notification that says where the item was saved.
 
 ## Files
 

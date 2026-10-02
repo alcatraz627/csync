@@ -93,6 +93,8 @@ Chat                           views: All · Favorites · Archived · Tools
 
 More
 ├─ Process monitor             This phone
+├─ Timers                      This phone: a ring for one, cards for up to four, saved tiles
+├─ Reminders                   This phone: views Timeline · Day · Week · Month
 ├─ Widgets                     This phone
 ├─ Settings
 │  └─ Connection
@@ -226,9 +228,21 @@ and controls, read from the same session (P-10, P-21).
 
 | Size | Where | Contents |
 |---|---|---|
-| Mini row | Above the bottom bar on every place, while a session is active | Output and state, title, Pause or Resume, Stop, Volume, Speed (P-18) |
+| Mini row | A card in the dock above the bottom bar, while a session is active | Output and state, title, Pause or Resume, Stop, Volume, Speed (P-18) |
 | Panel | Floats to half height when the mini row is tapped, never scrolls | Handle, title, seek, transport, the four settings (P-13 to P-17) |
 | Page | Media / Pi screen or Media / This phone | Picture or art, seek, transport, the four settings, output switch |
+
+### The dock
+
+Things that keep going while you do something else share one strip above the
+bottom bar: what plays on the Pi screen, what plays on this phone, and each
+running timer. Only one card shows at a time, the next one peeking at the
+edge; a sideways swipe moves between them and dots underneath count them
+(owner, 2026-10-03: "do not stack but can be swiped left / right"). A timer
+that has rung comes first, then media, then timers soonest first. The dock
+leaves timers out on the Timers page, which shows them itself, and steps aside
+while the keyboard is up. Anything added later joins the dock as another kind
+of card rather than another row.
 
 On the phone output, video fills the page's picture area and can go full
 screen. Full screen is a mode of that page, not another player. The Android
@@ -300,10 +314,29 @@ app, because the item came from this phone. File details is added for items
 that live on a drive, Delete for captures, and Take out of this note for an
 item inside a note. Share with another app opens Android's own share menu.
 
+Tapping a picture, a text file or a document opens it on the whole screen
+first (the viewer); its main actions sit along the bottom and every action is
+behind the button in its top bar. A picture sits on black between solid bars,
+so a screenshot's own bars never collide with the viewer's; a tap hides the
+bars and the picture fills the screen. Video, audio and links go straight to
+their actions.
+
 csync puts three entries in the share menu of other apps: csync (asks where
 the item goes), Send to Pi screen (no question), and Send to your last
 device. They are listed on the Widgets page with the widgets, tiles and
 shortcuts.
+
+## 7b. Timers and reminders
+
+Two places, never mixed (owner, 2026-10-02). Timers: turn the ring to set a
+length up to three hours; one running timer is counted down on the same ring,
+two to four show as cards. Each timer has a label and a colour; saved tiles
+start one in a tap and can be pinned to the home screen or reached from the
+app icon's long-press list. Every running timer has a notification with a
+drawn ring and Pause, Add a minute and Stop. Reminders: one box that reads
+typed times ("call home tomorrow at 9am"), shown back before it is added, and
+four views of the same list. A reminder rings with In 10 minutes and Done.
+Both have a Home card, a widget that acts in place, and a Quick Settings tile.
 
 ## 8. Words on screen
 
