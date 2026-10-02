@@ -104,6 +104,7 @@ func serve() error {
 		writeJSON(w, map[string]any{"tools": caps})
 	})
 	chatRoutes(mux, token, sessions)
+	phoneRoutes(mux, token)
 	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(w, r, token) {
 			return

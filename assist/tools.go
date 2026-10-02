@@ -180,6 +180,16 @@ func toolDeclarations() []gTool {
 			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{}},
 		},
 		{
+			Name: "phone_diagnostics",
+			Description: "Read the latest 'what slows this phone' report the owner's phone sent, with its age. " +
+				"Findings are ranked by score (Heavy 80+, Some 30+, Light). An accessibility service sees every tap " +
+				"and is the most common cause of input lag; notification listeners wake on every notification; " +
+				"overlay apps draw into every frame; battery-exempt apps run while asleep. pss_mb is memory an app " +
+				"really holds. Memory figures: MemAvailable is what Android can hand out now, and Cached is freed " +
+				"on demand, so a full-looking RAM is not by itself a problem. Fixes are applied on the phone, not here.",
+			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{}},
+		},
+		{
 			Name: "notes", Description: "List, read, create, update, or delete a Pi note. Changes require the current note revision so another editor is not overwritten.",
 			Parameters: gSchema{Type: "object", Properties: map[string]gSchema{
 				"action":            {Type: "string", Description: "list, read, create, update, or delete"},
@@ -247,6 +257,8 @@ func executeTool(name string, args map[string]any) map[string]any {
 		return mediaDiagnose()
 	case "notes":
 		return notesTool(args)
+	case "phone_diagnostics":
+		return phoneDiagnostics()
 	default:
 		return map[string]any{"error": "unknown tool " + name}
 	}

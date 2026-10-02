@@ -70,7 +70,8 @@ func systemPrompt() string {
 		"Be concise, direct, and practical. When you are unsure, say so. " +
 		"The folder shared/cache on each drive holds temporary copies, such as phone videos " +
 		"cast to the screen. Files there may be overwritten or removed without asking, and the " +
-		"folder is emptied only when the owner cleans it up; never keep anything there that matters."
+		"folder is emptied only when the owner cleans it up; never keep anything there that matters. " +
+		"When the owner says the phone is slow or laggy, read phone_diagnostics first and explain the top findings."
 }
 
 // meshToken is the shared secret, the same file the mesh agent uses, so a phone
