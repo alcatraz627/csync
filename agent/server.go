@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,7 +162,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 			copyToClipboard(dest)
 		}
 	}
-	notify(fmt.Sprintf("csync: %s from %s", kind, from), body)
+	notifyArrival(kind, from, body, dest)
 
 	log.Printf("received %s %q from %s (%d bytes) -> %s", kind, name, from, n, dest)
 	writeJSON(w, map[string]any{"ok": true, "saved": dest, "bytes": n})
@@ -189,6 +190,81 @@ func copyToClipboard(path string) {
 	in.Write(b)
 	in.Close()
 	_ = cmd.Wait()
+}
+
+// notifyArrival tells the person something arrived, and on a Mac makes the
+// notification lead to it: a picture opens, other files are shown in Finder,
+// and text (already on the clipboard) opens so it can be read.
+func notifyArrival(kind, from, body, dest string) {
+	title := fmt.Sprintf("csync: %s from %s", kind, from)
+	if runtime.GOOS != "darwin" {
+		notify(title, body)
+		return
+	}
+	notifier := findNotifier()
+	if notifier == "" {
+		notify(title, body+"\n"+arrivalHint(kind, dest, false))
+		return
+	}
+	args := []string{"-title", title, "-message", body, "-subtitle", arrivalHint(kind, dest, true), "-group", "csync-" + filepath.Base(dest)}
+	switch {
+	case kind == "text" || isPicture(dest):
+		args = append(args, "-open", (&url.URL{Scheme: "file", Path: dest}).String())
+		if isPicture(dest) {
+			args = append(args, "-contentImage", dest)
+		}
+	default:
+		args = append(args, "-execute", "/usr/bin/open -R "+shellQuote(dest))
+	}
+	// Without notification permission terminal-notifier exits non-zero; the plain
+	// notification then at least says where the item is.
+	if err := exec.Command(notifier, args...).Run(); err != nil {
+		notify(title, body+"\n"+arrivalHint(kind, dest, false))
+	}
+}
+
+// arrivalHint says what clicking the notification does, or, when it cannot do
+// anything, where the item was saved.
+func arrivalHint(kind, dest string, clickable bool) string {
+	switch {
+	case kind == "text" && clickable:
+		return "On the clipboard · click to read it"
+	case kind == "text":
+		return "On the clipboard"
+	case !clickable:
+		return "Saved in " + dest
+	case isPicture(dest):
+		return "Click to open it"
+	default:
+		return "Click to show it in Finder"
+	}
+}
+
+func isPicture(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".heic", ".webp", ".bmp", ".tiff":
+		return true
+	}
+	return false
+}
+
+// findNotifier locates terminal-notifier, which can act on a click. A service
+// started by launchd often lacks Homebrew on its PATH, so the usual places are
+// checked as well.
+func findNotifier() string {
+	if p, err := exec.LookPath("terminal-notifier"); err == nil {
+		return p
+	}
+	for _, p := range []string{"/opt/homebrew/bin/terminal-notifier", "/usr/local/bin/terminal-notifier"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // notify raises a native desktop notification, best-effort per platform.
