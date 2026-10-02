@@ -24,7 +24,18 @@ if command -v swiftc >/dev/null 2>&1; then
   mkdir -p "$APP/Contents/MacOS"
   cp -f notifier/Info.plist "$APP/Contents/Info.plist"
   swiftc -O -o "$APP/Contents/MacOS/csync-notifier" notifier/main.swift
+  # The csync mark as the app icon, so notifications are recognisable at a glance.
+  if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+    SET="$(mktemp -d)/csync.iconset"
+    mkdir -p "$SET" "$APP/Contents/Resources"
+    for s in 16 32 128 256 512; do
+      rsvg-convert -w "$s" -h "$s" notifier/icon.svg -o "$SET/icon_${s}x${s}.png"
+      rsvg-convert -w "$((s * 2))" -h "$((s * 2))" notifier/icon.svg -o "$SET/icon_${s}x${s}@2x.png"
+    done
+    iconutil -c icns "$SET" -o "$APP/Contents/Resources/csync.icns"
+  fi
   codesign --force --sign - "$APP"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" || true
 else
   echo "swiftc not found: notifications will not open what arrived"
 fi

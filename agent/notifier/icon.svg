@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="1024" height="1024">
+  <!-- The csync mark from the Android launcher icon: a hub linked to three devices. -->
+  <rect x="6" y="6" width="96" height="96" rx="22" fill="#181A20"/>
+  <g transform="translate(54 59) scale(0.84) translate(-54 -54)" stroke-linecap="round">
+    <path d="M54,54 L54,32 M54,54 L35,69 M54,54 L73,69" stroke="#E4572E" stroke-width="4" fill="none"/>
+    <circle cx="54" cy="24" r="7" fill="#E4572E"/>
+    <circle cx="35" cy="71" r="6" fill="#F2A48C"/>
+    <circle cx="73" cy="71" r="6" fill="#F2A48C"/>
+    <circle cx="54" cy="54" r="12" fill="#E4572E"/>
+    <circle cx="54" cy="54" r="4.5" fill="#FFFFFF"/>
+  </g>
+</svg>
