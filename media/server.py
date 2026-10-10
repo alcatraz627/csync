@@ -26,6 +26,7 @@ from . import displays, screen, system
 from .camera import Camera
 from .instagram import Instagram
 from .library import Drive, Library, MediaError
+from .notes_store import NotesFolder
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
 SHOW_IMAGE_CODECS = {"mjpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
@@ -70,9 +71,12 @@ class State:
                                 "expectedRevision": revision})
 
     def __init__(self, library: Library, database: Path, mpv_socket: Path | None = None,
-                 player_command: list[str] | None = None, camera: Camera | None = None):
+                 player_command: list[str] | None = None, camera: Camera | None = None,
+                 notes_folder: Path | None = None):
         self.library = library
         self.database = database
+        # The folder the Mac and the phone share; ~/Notes on the Pi, a scratch folder in tests.
+        self.notes = NotesFolder(notes_folder or Path.home() / "Notes")
         self.mpv_socket = mpv_socket
         self.player_command = player_command
         self.camera = camera
@@ -146,9 +150,43 @@ class State:
                 id TEXT PRIMARY KEY, detected_name TEXT NOT NULL, custom_name TEXT,
                 port TEXT NOT NULL, size TEXT, last_seen INTEGER,
                 settings TEXT NOT NULL DEFAULT '{}')""")
+        self._import_legacy_rows()
 
     def _db(self):
         return sqlite3.connect(self.database, timeout=5)
+
+    def _import_legacy_rows(self) -> None:
+        """Once: the notes and link pins the database held move into the folder, tagged with their source,
+        and a review list under .import/ says what came across so the owner can skim and delete."""
+        with self._db() as db:
+            notes = db.execute("SELECT id,title,body,created_at FROM notes ORDER BY created_at").fetchall()
+            pins = db.execute("SELECT id,title,url,description,content,tags,created_at FROM pins WHERE file_name='' ORDER BY created_at").fetchall()
+        if not notes and not pins:
+            return
+        moved: list[tuple[str, str, str]] = []
+        for note_id, title, body, created_at in notes:
+            new = self.notes.create(title or "(untitled)", body, source="csync")
+            moved.append((new["id"], title or "(untitled)", "note"))
+            for root in (self.note_files_root, self._note_folder(note_id).parent):
+                old = root / note_id
+                if old.exists() and not (root / new["id"]).exists():
+                    old.rename(root / new["id"])
+            with self._db() as db:
+                db.execute("UPDATE note_images SET note_id=? WHERE note_id=?", (new["id"], note_id))
+                db.execute("UPDATE note_files SET note_id=? WHERE note_id=?", (new["id"], note_id))
+                db.execute("DELETE FROM notes WHERE id=?", (note_id,))
+        for pin_id, title, url, description, content, tags, created_at in pins:
+            new = self.notes.create(title, content or description, url=url, tags=json.loads(tags or "[]") + ["pin"], source="csync")
+            moved.append((new["id"], title or url, "pin"))
+            with self._db() as db:
+                db.execute("DELETE FROM pins WHERE id=?", (pin_id,))
+        review = self.notes.folder / ".import"
+        review.mkdir(exist_ok=True)
+        with (review / "review.md").open("a", encoding="utf-8") as f:
+            f.write(f"# Imported from the csync database, {time.strftime('%Y-%m-%d %H:%M')}\n\n")
+            for new_id, title, kind in moved:
+                f.write(f"- {kind} `{new_id}`: {title}\n")
+            f.write("\n")
 
     @staticmethod
     def _note_fields(body: dict) -> tuple[str, str]:
@@ -170,63 +208,46 @@ class State:
         return {"id": row[0], "title": row[1], "body": row[2], "revision": row[3],
                 "createdAt": row[4], "updatedAt": row[5]}
 
+    # Notes and pins live in the shared folder (media/notes_store.py); pictures
+    # and files a note keeps stay in the state folder, keyed by the note's id.
     def notes_list(self, query: str = "") -> list[dict]:
         if len(query) > 128:
             raise MediaError("NOTE_INVALID", "Search notes with up to 128 characters")
+        q = query.lower()
+        notes = [n for n in self.notes.all() if "url" not in n
+                 and (not q or q in n["title"].lower() or q in n["body"].lower())][:500]
         with self._db() as db:
-            if query:
-                rows = db.execute(
-                    "SELECT id,title,body,revision,created_at,updated_at FROM notes "
-                    "WHERE instr(lower(title),lower(?))>0 OR instr(lower(body),lower(?))>0 "
-                    "ORDER BY updated_at DESC,id LIMIT 500", (query, query)).fetchall()
-            else:
-                rows = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes ORDER BY updated_at DESC,id LIMIT 500").fetchall()
             # How many pictures and files each note keeps, so a list can say so without opening it.
             kept = dict(db.execute(
                 "SELECT note_id,count(*) FROM (SELECT note_id FROM note_images UNION ALL "
                 "SELECT note_id FROM note_files) GROUP BY note_id").fetchall())
-        return [{**{key: value for key, value in self._note_row(row).items() if key != "body"},
-                 "items": kept.get(row[0], 0)} for row in rows]
+        return [{**{key: value for key, value in n.items() if key != "body"}, "items": kept.get(n["id"], 0)} for n in notes]
 
     def note_get(self, note_id: str) -> dict:
+        note = self.notes.read(note_id)
         with self._db() as db:
-            row = db.execute("SELECT id,title,body,revision,created_at,updated_at FROM notes WHERE id=?", (note_id,)).fetchone()
-            if row is not None:
-                files = db.execute("SELECT id,name,mime,size FROM note_files WHERE note_id=? "
-                                   "ORDER BY created_at,id", (note_id,)).fetchall()
-        if row is None:
-            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
-        return {**self._note_row(row),
-                "files": [{"id": f[0], "name": f[1], "mime": f[2], "size": f[3]} for f in files]}
+            files = db.execute("SELECT id,name,mime,size FROM note_files WHERE note_id=? "
+                               "ORDER BY created_at,id", (note_id,)).fetchall()
+        return {**note, "files": [{"id": f[0], "name": f[1], "mime": f[2], "size": f[3]} for f in files]}
 
     def note_create(self, body: dict) -> dict:
         title, content = self._note_fields(body)
-        note_id, now = str(uuid.uuid4()), int(time.time())
-        with self._db() as db:
-            db.execute("INSERT INTO notes VALUES(?,?,?,?,?,?)", (note_id, title, content, 1, now, now))
-        return self.note_get(note_id)
+        agent = body.get("agent") if isinstance(body.get("agent"), str) else None
+        return self.note_get(self.notes.create(title, content, agent=agent)["id"])
 
     def note_update(self, note_id: str, body: dict) -> dict:
         title, content = self._note_fields(body)
         revision = self._note_revision(body)
-        with self._db() as db:
-            changed = db.execute("UPDATE notes SET title=?,body=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?",
-                                 (title, content, int(time.time()), note_id, revision)).rowcount
-        if not changed:
-            self.note_get(note_id)
-            raise MediaError("NOTE_CONFLICT", "This note changed elsewhere. Reload it before saving", 409)
+        agent = body.get("agent") if isinstance(body.get("agent"), str) else None
+        self.notes.update(note_id, title, content, revision, agent=agent)
         return self.note_get(note_id)
 
     def note_delete(self, note_id: str, body: dict) -> dict:
         revision = self._note_revision(body)
+        self.notes.delete(note_id, revision)
         with self._db() as db:
-            changed = db.execute("DELETE FROM notes WHERE id=? AND revision=?", (note_id, revision)).rowcount
-            if changed:
-                db.execute("DELETE FROM note_images WHERE note_id=?", (note_id,))
-                db.execute("DELETE FROM note_files WHERE note_id=?", (note_id,))
-        if not changed:
-            self.note_get(note_id)
-            raise MediaError("NOTE_CONFLICT", "This note changed elsewhere. Reload it before deleting", 409)
+            db.execute("DELETE FROM note_images WHERE note_id=?", (note_id,))
+            db.execute("DELETE FROM note_files WHERE note_id=?", (note_id,))
         folder = self._note_folder(note_id)
         if folder.is_symlink():
             folder.unlink()
@@ -292,14 +313,12 @@ class State:
         folder = self._note_folder(note_id)
         file_id, now = str(uuid.uuid4()), int(time.time())
         final = self._store_upload(folder, file_id, length, source)
-        with self._db() as db:
-            # The note may have been deleted while the file was arriving.
-            added = db.execute("INSERT INTO note_files SELECT ?,?,?,?,?,? WHERE EXISTS "
-                               "(SELECT 1 FROM notes WHERE id=?)",
-                               (file_id, note_id, clean, mime, length, now, note_id)).rowcount
-        if not added:
+        # The note may have been deleted while the file was arriving.
+        if not self.notes.path(note_id).exists():
             final.unlink(missing_ok=True)
             raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        with self._db() as db:
+            db.execute("INSERT INTO note_files VALUES(?,?,?,?,?,?)", (file_id, note_id, clean, mime, length, now))
         return {"id": file_id, "name": clean, "mime": mime, "size": length}
 
     def note_file_open(self, note_id: str, file_id: str) -> tuple[dict, int]:
@@ -371,17 +390,34 @@ class State:
             pin["file"] = {"name": row[9], "mime": row[10], "size": row[11]}
         return pin
 
+    # A pin is a note with a url, or a snippet tagged "pin", in the shared folder.
+    # A pin that holds a file keeps its row in the state database, as before.
+    @staticmethod
+    def _pin_from_note(n: dict) -> dict:
+        tags = [t for t in n.get("tags", []) if t != "pin"]
+        return {"id": n["id"], "title": n["title"], "url": n.get("url", ""), "description": "",
+                "revision": n["revision"], "createdAt": n["createdAt"], "updatedAt": n["updatedAt"],
+                "content": n["body"], "tags": tags, **({"conflicted": True} if n.get("conflicted") else {}),
+                **({"agent": n["agent"]} if n.get("agent") else {})}
+
     def pins_list(self) -> list[dict]:
+        folder = [self._pin_from_note(n) for n in self.notes.all() if "url" in n or "pin" in n.get("tags", [])]
         with self._db() as db:
-            rows = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins ORDER BY updated_at DESC,id LIMIT 500").fetchall()
-        return [self._pin_row(row) for row in rows]
+            rows = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins WHERE file_name!='' ORDER BY updated_at DESC,id LIMIT 500").fetchall()
+        return sorted(folder + [self._pin_row(row) for row in rows], key=lambda p: (-p["updatedAt"], p["id"]))[:500]
 
     def pin_get(self, pin_id: str) -> dict:
         with self._db() as db:
-            row = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins WHERE id=?", (pin_id,)).fetchone()
-        if row is None:
+            row = db.execute(f"SELECT {self.PIN_COLUMNS} FROM pins WHERE id=? AND file_name!=''", (pin_id,)).fetchone()
+        if row is not None:
+            return self._pin_row(row)
+        try:
+            n = self.notes.read(pin_id)
+        except MediaError:
             raise MediaError("PIN_NOT_FOUND", "This pin is no longer available", 404)
-        return self._pin_row(row)
+        if "url" not in n and "pin" not in n.get("tags", []):
+            raise MediaError("PIN_NOT_FOUND", "This pin is no longer available", 404)
+        return self._pin_from_note(n)
 
     def pin_file_create(self, name: str, content_type: str, length: int, source) -> dict:
         """Pin one file of up to 20 MB. The pin is titled with the file's name and can be retitled later."""
@@ -406,36 +442,48 @@ class State:
 
     def pin_create(self, body: dict) -> dict:
         title, url, description, content, tags = self._pin_fields(body)
-        pin_id, now = str(uuid.uuid4()), int(time.time())
+        text = content or description
+        note = self.notes.create(title, text, url=url, tags=tags + ["pin"])
+        return self.pin_get(note["id"])
+
+    def _file_pin(self, pin_id: str) -> bool:
         with self._db() as db:
-            db.execute("INSERT INTO pins(id,title,url,description,revision,created_at,updated_at,content,tags) "
-                       "VALUES(?,?,?,?,?,?,?,?,?)",
-                       (pin_id, title, url, description, 1, now, now, content, json.dumps(tags)))
-        return self.pin_get(pin_id)
+            return db.execute("SELECT 1 FROM pins WHERE id=? AND file_name!=''", (pin_id,)).fetchone() is not None
 
     def pin_update(self, pin_id: str, body: dict) -> dict:
-        title, url, description, content, tags = self._pin_fields(body, "file" in self.pin_get(pin_id))
+        holds_file = self._file_pin(pin_id)
+        title, url, description, content, tags = self._pin_fields(body, holds_file)
         revision = self._pin_revision(body)
-        with self._db() as db:
-            changed = db.execute("UPDATE pins SET title=?,url=?,description=?,content=?,tags=?,"
-                                 "revision=revision+1,updated_at=? WHERE id=? AND revision=?",
-                                 (title, url, description, content, json.dumps(tags), int(time.time()),
-                                  pin_id, revision)).rowcount
-        if not changed:
-            self.pin_get(pin_id)
-            raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before saving", 409)
+        if holds_file:
+            with self._db() as db:
+                changed = db.execute("UPDATE pins SET title=?,url=?,description=?,content=?,tags=?,"
+                                     "revision=revision+1,updated_at=? WHERE id=? AND revision=?",
+                                     (title, url, description, content, json.dumps(tags), int(time.time()),
+                                      pin_id, revision)).rowcount
+            if not changed:
+                raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before saving", 409)
+            return self.pin_get(pin_id)
+        self.pin_get(pin_id)
+        self.notes.update(pin_id, title, content or description, revision, url=url, tags=tags + ["pin"])
         return self.pin_get(pin_id)
 
     def pin_delete(self, pin_id: str, body: dict) -> dict:
         revision = self._pin_revision(body)
-        with self._db() as db:
-            changed = db.execute("DELETE FROM pins WHERE id=? AND revision=?", (pin_id, revision)).rowcount
-        if not changed:
-            self.pin_get(pin_id)
-            raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
-        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pin_id):
-            (self.pin_files_root / pin_id).unlink(missing_ok=True)
-        return {"deleted": True, "id": pin_id}
+        if self._file_pin(pin_id):
+            with self._db() as db:
+                changed = db.execute("DELETE FROM pins WHERE id=? AND revision=?", (pin_id, revision)).rowcount
+            if not changed:
+                raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pin_id):
+                (self.pin_files_root / pin_id).unlink(missing_ok=True)
+            return {"deleted": True, "id": pin_id}
+        self.pin_get(pin_id)
+        try:
+            return self.notes.delete(pin_id, revision, code="PIN_CONFLICT")
+        except MediaError as e:
+            if e.code == "PIN_CONFLICT":
+                raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
+            raise
 
     def note_images(self, note_id: str) -> list[dict]:
         self.note_get(note_id)

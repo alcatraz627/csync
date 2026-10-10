@@ -32,7 +32,7 @@ class MediaServiceTest(unittest.TestCase):
         (root / "folder" / "track.mp3").write_bytes(b"audio")
         self.root = root
         library = Library([Drive("disk1", "Test USB", root, "fixture-uuid")], "secret", fixture_mounts=True)
-        self.state = State(library, Path(self.tmp.name) / "history.db")
+        self.state = State(library, Path(self.tmp.name) / "history.db", notes_folder=Path(self.tmp.name) / "notes")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(self.state, "secret"))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -250,25 +250,38 @@ class MediaServiceTest(unittest.TestCase):
         status, data, _ = self.request("PUT", item,
                                         {"title": "Test 2", "body": "| A | B |", "expectedRevision": 1})
         self.assertEqual((status, json.loads(data)["note"]["revision"]), (200, 2))
+        # A save on top of an edit it never saw keeps both sides in the body, marked, and never refuses.
         status, data, _ = self.request("PUT", item,
-                                        {"title": "Stale", "body": "lost", "expectedRevision": 1})
-        self.assertEqual((status, json.loads(data)["code"]), (409, "NOTE_CONFLICT"))
+                                        {"title": "Stale", "body": "phone side", "expectedRevision": 1})
+        note = json.loads(data)["note"]
+        self.assertEqual((status, note["revision"], note["conflicted"]), (200, 3, True))
+        self.assertIn("<<<<<<< phone\nphone side\n=======\n| A | B |\n>>>>>>> ", note["body"])
         status, data, _ = self.request("GET", item)
-        self.assertEqual((status, json.loads(data)["note"]["title"]), (200, "Test 2"))
+        self.assertEqual((status, json.loads(data)["note"]["title"]), (200, "Stale"))
+        # Deleting over an unseen edit would lose it, so that one is refused.
         status, data, _ = self.request("DELETE", item, {"expectedRevision": 1})
         self.assertEqual((status, json.loads(data)["code"]), (409, "NOTE_CONFLICT"))
-        status, data, _ = self.request("DELETE", item, {"expectedRevision": 2})
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 3})
         self.assertEqual((status, json.loads(data)["deleted"]), (200, True))
         status, data, _ = self.request("GET", item)
         self.assertEqual((status, json.loads(data)["code"]), (404, "NOTE_NOT_FOUND"))
+        # Every save is a version in the folder's repository, and an agent's note carries its tag.
+        status, data, _ = self.request("POST", route, {"title": "From the Pi", "body": "agent wrote this", "agent": "pi"})
+        agent_note = json.loads(data)["note"]
+        self.assertEqual((status, agent_note["agent"], agent_note["revision"]), (201, "pi", 1))
+        text = (Path(self.tmp.name) / "notes" / (agent_note["id"] + ".md")).read_text()
+        self.assertIn('agent: "pi"', text)
+        self.assertEqual(len(self.state.notes.history(agent_note["id"])), 1)
+        log = subprocess.run(["git", "log", "--oneline"], cwd=Path(self.tmp.name) / "notes", capture_output=True, text=True).stdout
+        self.assertIn("save (pi)", log)
 
     def test_notes_search_body_beyond_default_list_window(self):
-        with self.state._db() as db:
-            db.execute("INSERT INTO notes VALUES(?,?,?,?,?,?)",
-                       ("older", "Unrelated title", "Needle in Markdown", 1, 1, 1))
-            db.executemany("INSERT INTO notes VALUES(?,?,?,?,?,?)",
-                           ((f"new-{i}", "Recent", "ordinary", 1, 2, i + 2)
-                            for i in range(501)))
+        folder = Path(self.tmp.name) / "notes"
+        (folder / "older.md").write_text('---\ntitle: "Unrelated title"\n---\nNeedle in Markdown\n')
+        os.utime(folder / "older.md", (1, 1))
+        for i in range(501):
+            (folder / f"new-{i}.md").write_text('---\ntitle: "Recent"\n---\nordinary\n')
+            os.utime(folder / f"new-{i}.md", (2, i + 2))
         status, data, _ = self.request("GET", "/v1/notes")
         self.assertEqual(status, 200)
         self.assertEqual(len(json.loads(data)["notes"]), 500)
@@ -297,13 +310,20 @@ class MediaServiceTest(unittest.TestCase):
         self.assertEqual((status, json.loads(data)["pins"][0]["id"]), (200, pin["id"]))
         status, data, _ = self.request("PUT", item, {**body, "title": "Changed", "expectedRevision": 1})
         self.assertEqual((status, json.loads(data)["pin"]["revision"]), (200, 2))
-        status, data, _ = self.request("PUT", item, {**body, "expectedRevision": 1})
-        self.assertEqual((status, json.loads(data)["code"]), (409, "PIN_CONFLICT"))
+        # a pin is a note with a link in the shared folder
+        text = (Path(self.tmp.name) / "notes" / (pin["id"] + ".md")).read_text()
+        self.assertIn('url: "https://example.org/article"', text)
+        self.assertIn("tags:", text)
+        status, data, _ = self.request("GET", "/v1/notes")
+        self.assertNotIn(pin["id"], [n["id"] for n in json.loads(data)["notes"]])
+        # a stale save with the same words is just a save; a stale delete is refused
+        status, data, _ = self.request("PUT", item, {**body, "title": "Changed again", "expectedRevision": 1})
+        self.assertEqual((status, json.loads(data)["pin"]["revision"]), (200, 3))
         status, data, _ = self.request("GET", item)
-        self.assertEqual((status, json.loads(data)["pin"]["title"]), (200, "Changed"))
+        self.assertEqual((status, json.loads(data)["pin"]["title"]), (200, "Changed again"))
         status, data, _ = self.request("DELETE", item, {"expectedRevision": 1})
         self.assertEqual((status, json.loads(data)["code"]), (409, "PIN_CONFLICT"))
-        status, data, _ = self.request("DELETE", item, {"expectedRevision": 2})
+        status, data, _ = self.request("DELETE", item, {"expectedRevision": 3})
         self.assertEqual((status, json.loads(data)["deleted"]), (200, True))
         status, data, _ = self.request("GET", item)
         self.assertEqual((status, json.loads(data)["code"]), (404, "PIN_NOT_FOUND"))
@@ -335,10 +355,16 @@ class MediaServiceTest(unittest.TestCase):
                 created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""")
             db.execute("INSERT INTO pins VALUES(?,?,?,?,?,?,?)",
                        ("old", "Old link", "https://example.org", "Kept", 3, 1, 2))
-        migrated = State(self.state.library, old_db)
-        pin = migrated.pin_get("old")
-        self.assertEqual((pin["title"], pin["revision"], pin["content"], pin["tags"]),
-                         ("Old link", 3, "", []))
+        # The database's link pins move into the shared folder once, tagged with where they came from.
+        migrated = State(self.state.library, old_db, notes_folder=Path(self.tmp.name) / "migrated-notes")
+        pins = migrated.pins_list()
+        self.assertEqual([(p["title"], p["url"], p["content"], p["tags"]) for p in pins],
+                         [("Old link", "https://example.org", "Kept", [])])
+        text = (Path(self.tmp.name) / "migrated-notes" / (pins[0]["id"] + ".md")).read_text()
+        self.assertIn('source: "csync"', text)
+        self.assertIn("Old link", (Path(self.tmp.name) / "migrated-notes" / ".import" / "review.md").read_text())
+        with sqlite3.connect(old_db) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM pins").fetchone()[0], 0)
 
     def test_note_png_attachment_is_authenticated_and_deleted_with_note(self):
         note = self.state.note_create({"title": "Screenshots", "body": "Evidence"})
