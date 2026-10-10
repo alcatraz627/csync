@@ -36,6 +36,9 @@ def _unquote(value: str) -> str:
             return json.loads(value)
         except ValueError:
             return value
+    # YAML single quotes, as other editors write them: '' is a literal quote
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
     return value
 
 
@@ -44,7 +47,8 @@ def parse(text: str) -> tuple[dict, str]:
     fields: dict[str, str] = {}
     body = text
     if text.startswith("---\n"):
-        end = text.find("\n---\n", 4)
+        # from 3, so an empty block ("---" then "---") closes too
+        end = text.find("\n---\n", 3)
         if end >= 0:
             for line in text[4:end].split("\n"):
                 if ":" not in line:
@@ -53,7 +57,9 @@ def parse(text: str) -> tuple[dict, str]:
                 fields[key.strip()] = _unquote(value.strip())
             body = text[end + 5:]
     body = body.strip("\n")
-    if "title" not in fields and body:
+    if "title" in fields:
+        fields["title"] = fields["title"].strip()
+    if not fields.get("title") and body:
         first, _, rest = body.partition("\n")
         fields["title"] = first.lstrip("#").strip()
         body = rest.strip("\n")
