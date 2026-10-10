@@ -141,10 +141,12 @@ class NotesFolder:
         self._latest = latest
         return counts
 
-    def edited_at(self, note_id: str, p: Path) -> int:
+    def edited_at(self, note_id: str, p: Path, created: int | None = None) -> int:
         """When the note was last edited: its last commit, else the file's time.
-        The file time alone lies after a sync or checkout touches every file."""
-        self._commit_counts()
+        The file time alone lies after a sync or checkout touches every file, and a
+        note with one commit was only imported, so its own created time is truer."""
+        if self._commit_counts().get(note_id, 0) <= 1 and created:
+            return created
         return getattr(self, "_latest", {}).get(note_id) or int(p.stat().st_mtime)
 
     def revision(self, note_id: str) -> int:
@@ -184,7 +186,7 @@ class NotesFolder:
             created_at = int(st.st_mtime)
         tags = [t.strip() for t in fields.get("tags", "").split(",") if t.strip()]
         note = {"id": note_id, "title": fields.get("title", ""), "body": body,
-                "revision": self.revision(note_id), "createdAt": created_at, "updatedAt": self.edited_at(note_id, p),
+                "revision": self.revision(note_id), "createdAt": created_at, "updatedAt": self.edited_at(note_id, p, created_at if created else None),
                 "tags": tags, "conflicted": conflicted(body)}
         for key in ("agent", "source", "url", "color"):
             if fields.get(key):
