@@ -116,7 +116,7 @@ class NotesFolder:
         self._git("commit", "-q", "-m", reason)
         self._counts = None
 
-    _counts: tuple[str, dict[str, int]] | None = None
+    _counts: tuple[str, dict[str, int], dict[str, int]] | None = None
 
     def _head_stamp(self) -> str:
         """Changes whenever HEAD moves, here or by a push, without running git."""
@@ -143,17 +143,22 @@ class NotesFolder:
             elif line.endswith(".md"):
                 counts[line[:-3]] = counts.get(line[:-3], 0) + 1
                 latest.setdefault(line[:-3], when)
-        self._counts = (head, counts)
-        self._latest = latest
+        # one assignment, so a request thread never reads counts from one HEAD and times from another
+        self._counts = (head, counts, latest)
         return counts
 
     def edited_at(self, note_id: str, p: Path, created: int | None = None) -> int:
         """When the note was last edited: its last commit, else the file's time.
         The file time alone lies after a sync or checkout touches every file, and a
-        note with one commit was only imported, so its own created time is truer."""
-        if self._commit_counts().get(note_id, 0) <= 1 and created:
+        note with one commit was only imported, so its own created time is truer.
+        A note no commit has seen yet (just written) keeps its file time."""
+        self._commit_counts()
+        snap = self._counts   # one read: counts and times from the same HEAD
+        n = snap[1].get(note_id, 0) if snap else 0
+        latest = snap[2] if snap else {}
+        if n == 1 and created:
             return created
-        return getattr(self, "_latest", {}).get(note_id) or int(p.stat().st_mtime)
+        return latest.get(note_id) or int(p.stat().st_mtime)
 
     def revision(self, note_id: str) -> int:
         """How many commits have touched the note: 1 for a fresh one, 0 for a file git never saw."""
