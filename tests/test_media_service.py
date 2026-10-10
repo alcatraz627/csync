@@ -928,7 +928,7 @@ class MediaServiceTest(unittest.TestCase):
         body = {"itemId": item["id"], "target": "phone", "sessionId": session["id"],
                 "generation": session["generation"], "sequence": 1, "positionMs": 1000}
         self.state.save_progress(body)
-        restarted = State(self.state.library, self.state.database)
+        restarted = State(self.state.library, self.state.database, notes_folder=Path(self.tmp.name) / "notes")
         body.update(sequence=2, positionMs=3000)
         self.assertEqual(restarted.save_progress(body)["positionMs"], 3000)
         restarted.register_phone({"itemId": item["id"]})
