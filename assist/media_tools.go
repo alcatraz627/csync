@@ -72,7 +72,8 @@ func notesTool(args map[string]any) map[string]any {
 		if !titleOK || !bodyOK || strings.TrimSpace(title) == "" {
 			return map[string]any{"code": "NOTE_INVALID", "error": "title and Markdown body are required"}
 		}
-		request := map[string]any{"title": title, "body": body}
+		// every note the agent writes carries its tag, so the owner can tell it from their own
+		request := map[string]any{"title": title, "body": body, "agent": "pi"}
 		if action == "create" {
 			return mediaRequest(http.MethodPost, "/v1/notes", request)
 		}
