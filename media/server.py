@@ -2006,6 +2006,13 @@ def handler_for(state: State, token: str):
                 return self._json(200, state.note_image_delete(parts[3], parts[5]))
             elif self.command == "DELETE" and path.startswith("/v1/camera/captures/") and state.camera:
                 return self._json(200, state.camera.delete_capture(path.rsplit("/", 1)[-1]))
+            elif self.command == "PUT" and path.startswith("/v1/notes/") and path.endswith("/meta"):
+                # colour and pin only, from the phone's long-press menu
+                note_id = path.removeprefix("/v1/notes/").removesuffix("/meta")
+                body = self._body(4 * 1024)
+                color = body.get("color") if isinstance(body.get("color"), str) else None
+                pinned = body.get("pinned") if isinstance(body.get("pinned"), bool) else None
+                return self._json(200, {"note": state.notes.set_meta(note_id, color=color, pinned=pinned)})
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
                 note_id = path.removeprefix("/v1/notes/")
                 body = self._body(320 * 1024)

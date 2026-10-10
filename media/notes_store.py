@@ -265,6 +265,30 @@ class NotesFolder:
         self._write(note_id, fields, body, reason)
         return self.read(note_id)
 
+    COLORS = ("red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+
+    def set_meta(self, note_id: str, color: str | None = None, pinned: bool | None = None) -> dict:
+        """Colour and pin only: no revision check, since neither can lose anyone's writing.
+        color "" clears it; None leaves it as it is."""
+        p = self.path(note_id)
+        if not p.exists():
+            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        fields, body = parse(p.read_text(encoding="utf-8"))
+        if color is not None:
+            if color == "":
+                fields.pop("color", None)
+            elif color in self.COLORS:
+                fields["color"] = color
+            else:
+                raise MediaError("NOTE_COLOR", "That colour is not one of the eight", 400)
+        if pinned is not None:
+            if pinned:
+                fields["pinned"] = "true"
+            else:
+                fields.pop("pinned", None)
+        self._write(note_id, fields, body, "pin" if pinned is not None else "colour")
+        return self.read(note_id)
+
     def delete(self, note_id: str, expected: int, code: str = "NOTE_CONFLICT") -> dict:
         """Deleting over an edit never seen would lose it, so that one is refused."""
         p = self.path(note_id)
