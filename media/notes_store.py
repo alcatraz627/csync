@@ -96,7 +96,7 @@ class NotesFolder:
             self._git("config", "user.email", author + "@local")
             # the Mac pushes straight into this working tree
             self._git("config", "receive.denyCurrentBranch", "updateInstead")
-            (self.folder / ".gitignore").write_text("order.json\n.DS_Store\n.import/\n")
+            (self.folder / ".gitignore").write_text("order.json\n.DS_Store\n.import/\n.trash/\n")
             self._git("add", "-A")
             self._git("commit", "-q", "-m", "notes folder")
 
@@ -128,11 +128,24 @@ class NotesFolder:
         if self._counts and self._counts[0] == head:
             return self._counts[1]
         counts: dict[str, int] = {}
-        for line in self._git("log", "--format=", "--name-only", "--", "*.md").stdout.splitlines():
-            if line.endswith(".md"):
+        latest: dict[str, int] = {}
+        when = 0
+        # newest first, so the first time a file appears is its last edit
+        for line in self._git("log", "--format=@%ct", "--name-only", "--", "*.md").stdout.splitlines():
+            if line.startswith("@") and line[1:].isdigit():
+                when = int(line[1:])
+            elif line.endswith(".md"):
                 counts[line[:-3]] = counts.get(line[:-3], 0) + 1
+                latest.setdefault(line[:-3], when)
         self._counts = (head, counts)
+        self._latest = latest
         return counts
+
+    def edited_at(self, note_id: str, p: Path) -> int:
+        """When the note was last edited: its last commit, else the file's time.
+        The file time alone lies after a sync or checkout touches every file."""
+        self._commit_counts()
+        return getattr(self, "_latest", {}).get(note_id) or int(p.stat().st_mtime)
 
     def revision(self, note_id: str) -> int:
         """How many commits have touched the note: 1 for a fresh one, 0 for a file git never saw."""
@@ -171,7 +184,7 @@ class NotesFolder:
             created_at = int(st.st_mtime)
         tags = [t.strip() for t in fields.get("tags", "").split(",") if t.strip()]
         note = {"id": note_id, "title": fields.get("title", ""), "body": body,
-                "revision": self.revision(note_id), "createdAt": created_at, "updatedAt": int(st.st_mtime),
+                "revision": self.revision(note_id), "createdAt": created_at, "updatedAt": self.edited_at(note_id, p),
                 "tags": tags, "conflicted": conflicted(body)}
         for key in ("agent", "source", "url", "color"):
             if fields.get(key):
