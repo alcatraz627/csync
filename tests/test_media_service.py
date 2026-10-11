@@ -220,6 +220,56 @@ class MediaServiceTest(unittest.TestCase):
         self.assertEqual(list(cache.iterdir()), [])
         self.assertEqual(sorted(p.name for p in (self.root / "shared" / "kept").iterdir()), ["My clip.mp4", "Other.mp4"])
 
+    def _put_file(self, folder, name, body, drive="disk1"):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        conn.request("POST", f"/v1/files?driveId={drive}&path={folder}&name={name}", body,
+                     {"X-Csync-Token": "secret", "Content-Type": "application/octet-stream"})
+        response = conn.getresponse()
+        data = json.loads(response.read())
+        conn.close()
+        return response.status, data
+
+    def test_a_new_folder_and_a_new_file_are_made_inside_the_drive_without_overwriting(self):
+        status, data, _ = self.request("POST", "/v1/folders", {"driveId": "disk1", "path": "folder", "name": "Trip 2026"})
+        self.assertEqual(status, 201)
+        made = json.loads(data)["item"]
+        self.assertEqual((made["directory"], made["relativePath"]), (True, "folder/Trip 2026"))
+        self.assertTrue((self.root / "folder" / "Trip 2026").is_dir())
+        status, data, _ = self.request("POST", "/v1/folders", {"driveId": "disk1", "path": "folder", "name": "Trip 2026"})
+        self.assertEqual((status, json.loads(data)["code"]), (409, "NAME_TAKEN"))
+        for bad in ("", "  ", "a/b", "..", ".hidden", "x\\y", "dot.", "n" * 300):
+            status, data, _ = self.request("POST", "/v1/folders", {"driveId": "disk1", "path": "", "name": bad})
+            self.assertEqual((status, json.loads(data)["code"]), (400, "NAME_INVALID"), bad)
+        status, data, _ = self.request("POST", "/v1/folders", {"driveId": "disk1", "path": "../outside", "name": "x"})
+        self.assertEqual(status, 400)
+        self.assertFalse((self.root.parent / "outside").exists())
+        status, data, _ = self.request("POST", "/v1/folders", {"driveId": "nope", "path": "", "name": "x"})
+        self.assertEqual((status, json.loads(data)["code"]), (404, "DRIVE_UNKNOWN"))
+
+        status, data = self._put_file("folder/Trip%202026", "beach.jpg", b"jpeg bytes" * 20)
+        self.assertEqual(status, 201)
+        self.assertEqual(data["item"]["relativePath"], "folder/Trip 2026/beach.jpg")
+        self.assertEqual((self.root / "folder" / "Trip 2026" / "beach.jpg").read_bytes(), b"jpeg bytes" * 20)
+        # The new picture and the new folder show in the listing that made them necessary.
+        status, listed, _ = self.request("GET", "/v1/items?driveId=disk1&path=folder%2FTrip+2026")
+        self.assertEqual([x["name"] for x in json.loads(listed)["items"]], ["beach.jpg"])
+        # A second file with the same name is refused and the first is untouched.
+        status, data = self._put_file("folder/Trip%202026", "beach.jpg", b"other")
+        self.assertEqual((status, data["code"]), (409, "NAME_TAKEN"))
+        self.assertEqual((self.root / "folder" / "Trip 2026" / "beach.jpg").read_bytes(), b"jpeg bytes" * 20)
+        status, data = self._put_file("folder", "notes.txt", b"text")
+        self.assertEqual((status, data["code"]), (400, "UPLOAD_TYPE"))
+        status, data = self._put_file("folder", "..%2Fescape.mp3", b"audio")
+        self.assertEqual((status, data["code"]), (400, "NAME_INVALID"))
+        status, data = self._put_file("missing", "a.mp3", b"audio")
+        self.assertEqual((status, data["code"]), (404, "ITEM_UNAVAILABLE"))
+        # A send that stops partway leaves nothing behind.
+        with self.assertRaises(MediaError) as error:
+            self.state.library.save_file("disk1", "folder", "part.mp3", 100, io.BytesIO(b"partial"))
+        self.assertEqual(error.exception.code, "UPLOAD_INCOMPLETE")
+        self.assertFalse((self.root / "folder" / "part.mp3").exists())
+        self.assertFalse((self.root.parent / "escape.mp3").exists())
+
     def test_app_update_requires_token_and_serves_only_staged_regular_file(self):
         route = "/v1/app/apk"
         status, data, _ = self.request("GET", route)
