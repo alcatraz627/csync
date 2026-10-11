@@ -35,6 +35,9 @@ func TestSwitchboardActRefusals(t *testing.T) {
 		{"no key", actRequest(http.MethodPost, `{"tab":"plugins"}`), http.StatusBadRequest},
 		{"unknown tab", actRequest(http.MethodPost, `{"tab":"../x","key":"k"}`), http.StatusNotFound},
 		{"old binary", actRequest(http.MethodPost, `{"tab":"plugins","key":"k","button":"Enable"}`), http.StatusConflict},
+		{"bulbs is a known tab", actRequest(http.MethodPost, `{"tab":"bulbs","key":"k","button":"On"}`), http.StatusConflict},
+		{"value too long", actRequest(http.MethodPost, `{"tab":"bulbs","key":"k","button":"Colour","value":"`+strings.Repeat("a", 65)+`"}`), http.StatusBadRequest},
+		{"old binary with a value", actRequest(http.MethodPost, `{"tab":"bulbs","key":"k","button":"Brightness","value":"50"}`), http.StatusConflict},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -87,5 +90,49 @@ func TestSwitchboardRoute(t *testing.T) {
 	handleSwitchboard(rec, httptest.NewRequest(http.MethodGet, "/switchboard/../../etc", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("an unknown tab must be refused, got %d", rec.Code)
+	}
+}
+
+// The three tabs added for the phone are on the allow-list, and an old binary is still refused.
+func TestSwitchboardNewTabsAllowed(t *testing.T) {
+	t.Setenv("CSYNC_SWITCHBOARD", "/bin/echo")
+	for _, tab := range []string{"usage", "bulbs", "agents"} {
+		rec := httptest.NewRecorder()
+		handleSwitchboard(rec, httptest.NewRequest(http.MethodGet, "/switchboard/"+tab, nil))
+		if rec.Code != http.StatusConflict {
+			t.Errorf("%s: an old binary must get 409 (not 404), got %d", tab, rec.Code)
+		}
+	}
+}
+
+// Runs only where a Switchboard binary is named. Usage and agents are read only; the bulbs
+// press uses a key no bulb has, so Switchboard refuses it and no real bulb is touched.
+func TestSwitchboardNewTabsLive(t *testing.T) {
+	if os.Getenv("CSYNC_SWITCHBOARD") == "" {
+		t.Skip("set CSYNC_SWITCHBOARD to a Switchboard binary")
+	}
+	for _, tab := range []string{"usage", "agents"} {
+		rec := httptest.NewRecorder()
+		handleSwitchboard(rec, httptest.NewRequest(http.MethodGet, "/switchboard/"+tab, nil))
+		var got struct {
+			Tab    string `json:"tab"`
+			Groups []struct {
+				Rows []map[string]any `json:"rows"`
+			} `json:"groups"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Tab != tab || len(got.Groups) == 0 {
+			t.Fatalf("%s: unexpected answer %d %s", tab, rec.Code, rec.Body.String())
+		}
+		if tab == "usage" && len(got.Groups[0].Rows) > 0 {
+			if _, ok := got.Groups[0].Rows[0]["percent"]; !ok {
+				t.Errorf("usage rows must carry a percent: %v", got.Groups[0].Rows[0])
+			}
+		}
+	}
+	rec := httptest.NewRecorder()
+	handleSwitchboard(rec, actRequest(http.MethodPost, `{"tab":"bulbs","key":"no-such-bulb","button":"Brightness","value":"50"}`))
+	var got struct{ Error string }
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || !strings.Contains(got.Error, "refresh the list") {
+		t.Fatalf("want Switchboard's refusal for an unknown bulb, got %d %s", rec.Code, rec.Body.String())
 	}
 }

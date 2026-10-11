@@ -18,7 +18,8 @@ import (
 )
 
 // The list tabs Switchboard can export; anything else is refused before running it.
-var switchboardTabs = map[string]bool{"library": true, "rules": true, "ledger": true, "plugins": true, "queue": true}
+var switchboardTabs = map[string]bool{"library": true, "rules": true, "ledger": true, "plugins": true, "queue": true,
+	"usage": true, "bulbs": true, "agents": true}
 
 func switchboardBinary() string {
 	if p := os.Getenv("CSYNC_SWITCHBOARD"); p != "" {
@@ -78,10 +79,15 @@ func handleSwitchboardAct(w http.ResponseWriter, r *http.Request) {
 	}
 	var ask struct {
 		Tab, Key, Button string
+		Value            string // the line a brightness or colour button asks for
 		Confirmed        bool
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&ask); err != nil || ask.Key == "" {
 		http.Error(w, `{"error":"send tab, key and button"}`, http.StatusBadRequest)
+		return
+	}
+	if len(ask.Value) > 64 {
+		http.Error(w, `{"error":"value is too long"}`, http.StatusBadRequest)
 		return
 	}
 	if !switchboardTabs[ask.Tab] {
@@ -92,9 +98,16 @@ func handleSwitchboardAct(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Switchboard on this Mac is too old to act from the phone; update it"}`, http.StatusConflict)
 		return
 	}
+	if ask.Value != "" && !switchboardCurrent("needs a --value") {
+		http.Error(w, `{"error":"Switchboard on this Mac is too old to take a value from the phone; update it"}`, http.StatusConflict)
+		return
+	}
 	args := []string{"--act", ask.Tab, "--key", ask.Key}
 	if ask.Button != "" {
 		args = append(args, "--button", ask.Button)
+	}
+	if ask.Value != "" {
+		args = append(args, "--value", ask.Value)
 	}
 	if ask.Confirmed {
 		args = append(args, "--confirmed")
