@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // An old Switchboard (no --json) must be refused, never run: it would launch as a second app.
@@ -134,5 +136,54 @@ func TestSwitchboardNewTabsLive(t *testing.T) {
 	var got struct{ Error string }
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || !strings.Contains(got.Error, "refresh the list") {
 		t.Fatalf("want Switchboard's refusal for an unknown bulb, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A phone that hangs up mid-press must not kill the action: the run is detached from the request.
+func TestSwitchboardActSurvivesDroppedConnection(t *testing.T) {
+	fake := t.TempDir() + "/Switchboard"
+	script := "#!/bin/sh\n# no longer on the Mac; refresh the list\nsleep 0.3\necho '{\"ok\":true}'\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CSYNC_SWITCHBOARD", fake)
+	ctx, cancel := context.WithCancel(context.Background())
+	req := actRequest(http.MethodPost, `{"tab":"ledger","key":"k","button":"Kill"}`).WithContext(ctx)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	rec := httptest.NewRecorder()
+	handleSwitchboardAct(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("a dropped connection must not cancel the act, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The binary is scanned once per version; a changed file is scanned again.
+func TestSwitchboardCurrentCachesByVersion(t *testing.T) {
+	fake := t.TempDir() + "/Switchboard"
+	if err := os.WriteFile(fake, []byte("has marker-x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CSYNC_SWITCHBOARD", fake)
+	if !switchboardCurrent("marker-x") {
+		t.Fatal("marker should be found")
+	}
+	// Same size and mtime but different bytes: the cached answer stands, proving no re-read.
+	info, _ := os.Stat(fake)
+	if err := os.WriteFile(fake, []byte("has marker-y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(fake, info.ModTime(), info.ModTime())
+	if !switchboardCurrent("marker-x") {
+		t.Fatal("same mtime and size should answer from the cache")
+	}
+	// A different size is a new version and is scanned again.
+	if err := os.WriteFile(fake, []byte("has marker-y!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if switchboardCurrent("marker-x") {
+		t.Fatal("a changed file must be scanned again")
 	}
 }

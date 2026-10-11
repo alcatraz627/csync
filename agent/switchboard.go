@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,9 +34,41 @@ func switchboardBinary() string {
 // A build from before them ignores the flags and launches as a second app, which once
 // displaced the owner's running one, so look for the export in the binary first.
 func switchboardCurrent(marker string) bool {
-	bin, err := os.ReadFile(switchboardBinary())
-	return err == nil && bytes.Contains(bin, []byte(marker))
+	path := switchboardBinary()
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	key := markerKey{path, info.ModTime().UnixNano(), info.Size(), marker}
+	markerMu.Lock()
+	found, seen := markerSeen[key]
+	markerMu.Unlock()
+	if seen {
+		return found
+	}
+	bin, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	found = bytes.Contains(bin, []byte(marker))
+	markerMu.Lock()
+	markerSeen[key] = found
+	markerMu.Unlock()
+	return found
 }
+
+// The binary is scanned once per version (path, mtime, size, marker), not once per request.
+type markerKey struct {
+	path   string
+	mtime  int64
+	size   int64
+	marker string
+}
+
+var (
+	markerMu   sync.Mutex
+	markerSeen = map[markerKey]bool{}
+)
 
 func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 	tab := strings.TrimPrefix(r.URL.Path, "/switchboard/")
@@ -117,7 +150,9 @@ func handleSwitchboardAct(w http.ResponseWriter, r *http.Request) {
 	if ask.Confirmed {
 		args = append(args, "--confirmed")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// A phone that drops the connection must not kill the action half way: the parent keeps
+	// the request's values but not its cancellation; the timeout still bounds the run.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer cancel()
 	// Switchboard exits non-zero for a refusal or a failed button but still prints its answer.
 	out, _ := exec.CommandContext(ctx, switchboardBinary(), args...).Output()
