@@ -1849,6 +1849,13 @@ def handler_for(state: State, token: str):
                     return self._note_file(parts[3], parts[5])
                 if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "files":
                     return self._json(200, {"files": state.note_files(parts[3])})
+                # every save of a note, newest first, and the note as one of them was
+                if len(parts) == 5 and parts[1:3] == ["v1", "notes"] and parts[4] == "history":
+                    if not state.notes.path(parts[3]).exists():
+                        raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+                    return self._json(200, {"versions": state.notes.history(parts[3])})
+                if len(parts) == 6 and parts[1:3] == ["v1", "notes"] and parts[4] == "history":
+                    return self._json(200, {"note": state.notes.version(parts[3], parts[5])})
                 if path.startswith("/v1/notes/"):
                     return self._json(200, {"note": state.note_get(path.removeprefix("/v1/notes/"))})
                 if path == "/v1/player/pi":

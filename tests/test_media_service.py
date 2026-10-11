@@ -296,6 +296,21 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(status, 400, bad)
         self.assertFalse(any(n["title"] == "Bad" for n in self.state.notes.all()))
 
+    def test_note_history_lists_versions_and_reads_an_old_one(self):
+        status, data, _ = self.request("POST", "/v1/notes", {"title": "Versions", "body": "first words"})
+        note = json.loads(data)["note"]
+        item = "/v1/notes/" + note["id"]
+        self.request("PUT", item, {"title": "Versions", "body": "second words", "expectedRevision": note["revision"]})
+        status, data, _ = self.request("GET", item + "/history")
+        versions = json.loads(data)["versions"]
+        self.assertEqual((status, len(versions)), (200, 2))
+        status, data, _ = self.request("GET", item + "/history/" + versions[-1]["sha"])
+        self.assertEqual((status, json.loads(data)["note"]["body"]), (200, "first words"))
+        status, data, _ = self.request("GET", item + "/history/zz;rm")
+        self.assertEqual(status, 404)
+        status, data, _ = self.request("GET", "/v1/notes/no-such-note/history")
+        self.assertEqual(status, 404)
+
     def test_notes_search_body_beyond_default_list_window(self):
         folder = Path(self.tmp.name) / "notes"
         (folder / "older.md").write_text('---\ntitle: "Unrelated title"\n---\nNeedle in Markdown\n')

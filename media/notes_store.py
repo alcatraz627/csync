@@ -173,6 +173,17 @@ class NotesFolder:
                 rows.append({"sha": parts[0], "at": int(parts[1]), "reason": parts[2]})
         return rows
 
+    def version(self, note_id: str, sha: str) -> dict:
+        """The note as it was saved at one version from history, for reading or bringing back."""
+        self.path(note_id)
+        if not re.fullmatch(r"[0-9a-f]{4,40}", sha):
+            raise MediaError("NOTE_NOT_FOUND", "That version is not in this note's history", 404)
+        shown = self._git("show", f"{sha}:{note_id}.md")
+        if shown.returncode != 0:
+            raise MediaError("NOTE_NOT_FOUND", "That version is not in this note's history", 404)
+        fields, body = parse(shown.stdout)
+        return {"id": note_id, "sha": sha, "title": fields.get("title", note_id), "body": body}
+
     # ── files ──
     def path(self, note_id: str) -> Path:
         if not ID_RE.fullmatch(note_id):
