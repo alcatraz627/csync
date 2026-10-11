@@ -157,6 +157,51 @@ class OrderTest(unittest.TestCase):
         self.assertEqual(self.ids().index("E"), self.ids().index("W") + 1)
 
 
+class ReminderKeysTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = Path(self.tmp.name) / "notes"
+        self.store = NotesFolder(self.folder)
+        write_note(self.folder, "N", "2026-10-01T10:00:00Z", remind_at="2026-10-12T09:30:00Z",
+                   remind_repeat="weekly", reminder_id='"EK-1"')
+        self.store.commit("fixture")
+
+    def test_shape_returns_the_three_keys(self):
+        note = self.store.read("N")
+        self.assertEqual((note["remindAt"], note["remindRepeat"], note.get("remindOn")), (1791797400, "weekly", None))
+
+    def test_set_and_clear_and_key_order(self):
+        self.store.set_meta("N", remind_on="phone")
+        text = (self.folder / "N.md").read_text()
+        self.assertIn("remind_repeat: weekly\nremind_on: phone\nreminder_id:", text)
+        self.assertEqual(self.store.read("N")["remindOn"], "phone")
+        self.store.set_meta("N", remind_at=1791711000, remind_repeat="daily", remind_on="mac")
+        note = self.store.read("N")
+        self.assertEqual((note["remindAt"], note["remindRepeat"], note["remindOn"]), (1791711000, "daily", "mac"))
+        self.assertIn("remind_at: 2026-10-11T09:30:00Z\n", (self.folder / "N.md").read_text())
+        self.store.set_meta("N", remind_on=None)
+        self.assertNotIn("remindOn", self.store.read("N"))
+        self.store.set_meta("N", remind_at=None)
+        note = self.store.read("N")
+        self.assertEqual([k in note for k in ("remindAt", "remindRepeat", "remindOn")], [False] * 3)
+        self.assertEqual(note["revision"], 5)
+
+    def test_bad_values_are_refused_and_nothing_is_written(self):
+        before = (self.folder / "N.md").read_text()
+        for kw in ({"remind_on": "tablet"}, {"remind_repeat": "hourly"}, {"remind_at": "tomorrow"},
+                   {"remind_at": True}, {"remind_at": -5}):
+            with self.assertRaises(Exception) as ctx:
+                self.store.set_meta("N", **kw)
+            self.assertEqual(ctx.exception.code, "NOTE_INVALID", kw)
+        self.assertEqual((self.folder / "N.md").read_text(), before)
+
+    def test_a_note_save_keeps_the_keys(self):
+        self.store.set_meta("N", remind_on="phone")
+        self.store.update("N", "N", "new words", self.store.revision("N"))
+        self.assertEqual(self.store.read("N")["remindOn"], "phone")
+
+
 class OrderHttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -196,6 +241,15 @@ class OrderHttpTest(unittest.TestCase):
         self.assertEqual((status, body["code"]), (400, "NOTE_INVALID"))
         status, body = self.call("PUT", f"/v1/notes/{ids[0]}/meta", {"after": "missing"})
         self.assertEqual((status, body["code"]), (400, "NOTE_INVALID"))
+        status, body = self.call("PUT", f"/v1/notes/{ids[0]}/meta", {"remindAt": 1791711000, "remindOn": "phone"})
+        self.assertEqual((status, body["note"]["remindAt"], body["note"]["remindOn"]), (200, 1791711000, "phone"))
+        for bad in ({"remindAt": "soon"}, {"remindOn": "tablet"}, {"remindRepeat": 3}, {"remindAt": True}):
+            status, body = self.call("PUT", f"/v1/notes/{ids[0]}/meta", bad)
+            self.assertEqual((status, body["code"]), (400, "NOTE_INVALID"), bad)
+        status, body = self.call("GET", f"/v1/notes/{ids[0]}")
+        self.assertEqual(body["note"]["remindOn"], "phone")
+        status, body = self.call("GET", "/v1/notes")
+        self.assertEqual({n["id"]: n.get("remindOn") for n in body["notes"]}[ids[0]], "phone")
         status, body = self.call("PUT", f"/v1/notes/{ids[0]}/meta", {"color": "red"})
         self.assertEqual((status, body["note"].get("pos") is not None), (200, True))
 

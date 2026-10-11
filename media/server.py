@@ -262,12 +262,20 @@ class State:
             raise MediaError("NOTE_COLOR", "That colour is not one of the eight")
 
     def note_meta(self, note_id: str, body: dict, color: str | None, pinned: bool | None) -> dict:
-        """Colour, pin and place in the shared order; `after` is a note id, or null for the top of the group."""
+        """Colour, pin, place in the shared order (`after` is a note id, or null for the top of the group) and
+        the reminder keys remindAt (epoch seconds), remindRepeat and remindOn."""
         extra = {}
         if "after" in body:
             if body["after"] is not None and not isinstance(body["after"], str):
                 raise MediaError("NOTE_INVALID", "After must be a note id or null")
             extra["after"] = body["after"]
+        for key, field, kinds in (("remindAt", "remind_at", (int, type(None))),
+                                  ("remindRepeat", "remind_repeat", (str, type(None))),
+                                  ("remindOn", "remind_on", (str, type(None)))):
+            if key in body:
+                if not isinstance(body[key], kinds) or isinstance(body[key], bool):
+                    raise MediaError("NOTE_INVALID", f"{key} has the wrong type")
+                extra[field] = body[key]
         return self.notes.set_meta(note_id, color=color, pinned=pinned, **extra)
 
     def note_create(self, body: dict) -> dict:

@@ -21,7 +21,7 @@ from .library import MediaError
 
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 # Frontmatter keys in the order Switchboard writes them; unknown keys are kept after these.
-KEY_ORDER = ("title", "created", "tags", "expires", "remind_at", "remind_repeat", "reminder_id",
+KEY_ORDER = ("title", "created", "tags", "expires", "remind_at", "remind_repeat", "remind_on", "reminder_id",
              "pinned", "color", "agent", "source", "url", "pos")
 QUOTED = {"title", "tags", "reminder_id", "agent", "source", "url"}
 
@@ -294,6 +294,15 @@ class NotesFolder:
             note["pinned"] = True
         if fields.get("pos"):
             note["pos"] = fields["pos"]
+        if fields.get("remind_at"):
+            try:
+                note["remindAt"] = int(datetime.fromisoformat(fields["remind_at"].replace("Z", "+00:00")).timestamp())
+            except ValueError:
+                pass
+        if fields.get("remind_repeat"):
+            note["remindRepeat"] = fields["remind_repeat"]
+        if fields.get("remind_on"):
+            note["remindOn"] = fields["remind_on"]
         return note
 
     def _write(self, note_id: str, fields: dict, body: str, reason: str) -> None:
@@ -443,13 +452,17 @@ class NotesFolder:
 
         return _halves("", below, count)
 
+    REPEATS = ("never", "daily", "weekly", "monthly")
+    DEVICES = ("mac", "phone")
     _UNSET = object()
 
     def set_meta(self, note_id: str, color: str | None = None, pinned: bool | None = None,
-                 after=_UNSET) -> dict:
-        """Colour, pin and place in the shared order only: no revision check, since none of them can lose
-        anyone's writing. color "" clears it; None leaves it as it is. `after` is the id of the note to
-        sit under, or None for the top of the note's pinned group."""
+                 after=_UNSET, remind_at=_UNSET, remind_repeat=_UNSET, remind_on=_UNSET) -> dict:
+        """Colour, pin, place in the shared order and the reminder keys only: no revision check, since none
+        of them can lose anyone's writing. color "" clears it; None leaves it as it is. `after` is the id
+        of the note to sit under, or None for the top of the note's pinned group. remind_at is epoch
+        seconds, and None clears the whole reminder; remind_repeat and remind_on take their words or
+        None to clear."""
         p = self.path(note_id)
         if not p.exists():
             raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
@@ -466,6 +479,28 @@ class NotesFolder:
                 fields["pinned"] = "true"
             else:
                 fields.pop("pinned", None)
+        if remind_at is not self._UNSET:
+            if remind_at is None:
+                for key in ("remind_at", "remind_repeat", "remind_on"):
+                    fields.pop(key, None)
+            elif isinstance(remind_at, int) and not isinstance(remind_at, bool) and 0 < remind_at < 253402300800:
+                fields["remind_at"] = datetime.fromtimestamp(remind_at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                raise MediaError("NOTE_INVALID", "The reminder time must be whole seconds since 1970", 400)
+        if remind_repeat is not self._UNSET:
+            if remind_repeat in (None, "never"):
+                fields.pop("remind_repeat", None)
+            elif remind_repeat in self.REPEATS:
+                fields["remind_repeat"] = remind_repeat
+            else:
+                raise MediaError("NOTE_INVALID", "Repeat is never, daily, weekly or monthly", 400)
+        if remind_on is not self._UNSET:
+            if remind_on is None:
+                fields.pop("remind_on", None)
+            elif remind_on in self.DEVICES:
+                fields["remind_on"] = remind_on
+            else:
+                raise MediaError("NOTE_INVALID", "Remind on mac or phone", 400)
         others: dict[str, str] = {}
         if after is not self._UNSET:
             if after is not None and (not isinstance(after, str) or after == note_id):
@@ -473,9 +508,11 @@ class NotesFolder:
             others = self._arrange(note_id, fields, after)
         for other_id, text in others.items():
             self.path(other_id).write_bytes(text.encode("utf-8"))
-        reason = "move" if after is not self._UNSET else "pin" if pinned is not None else "colour"
+        reminder = any(v is not self._UNSET for v in (remind_at, remind_repeat, remind_on))
+        reason = "move" if after is not self._UNSET else "pin" if pinned is not None else \
+            "reminder" if reminder else "colour"
         patched = None
-        if after is not self._UNSET and color is None and pinned is None:
+        if after is not self._UNSET and color is None and pinned is None and not reminder:
             # a plain move changes one line and nothing else in the file
             patched = with_pos(p.read_bytes().decode("utf-8"), fields["pos"])
         if patched is not None:
