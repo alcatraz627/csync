@@ -275,6 +275,27 @@ class MediaServiceTest(unittest.TestCase):
         log = subprocess.run(["git", "log", "--oneline"], cwd=Path(self.tmp.name) / "notes", capture_output=True, text=True).stdout
         self.assertIn("save (pi)", log)
 
+    def test_note_saved_with_tags_colour_and_pin(self):
+        # The phone sets tags, colour and pin while writing a note, in the same save.
+        status, data, _ = self.request("POST", "/v1/notes", {"title": "Tagged", "body": "x",
+                                       "tags": ["work", " ideas "], "color": "green", "pinned": True})
+        note = json.loads(data)["note"]
+        self.assertEqual((status, note["tags"], note.get("color"), note.get("pinned")), (201, ["work", "ideas"], "green", True))
+        item = "/v1/notes/" + note["id"]
+        # An update without tags keeps them; with tags replaces them; colour "" clears it.
+        status, data, _ = self.request("PUT", item, {"title": "Tagged", "body": "y", "expectedRevision": note["revision"]})
+        note = json.loads(data)["note"]
+        self.assertEqual((status, note["tags"]), (200, ["work", "ideas"]))
+        status, data, _ = self.request("PUT", item, {"title": "Tagged", "body": "y", "tags": ["solo"], "color": "",
+                                       "pinned": False, "expectedRevision": note["revision"]})
+        note = json.loads(data)["note"]
+        self.assertEqual((status, note["tags"], note.get("color"), bool(note.get("pinned"))), (200, ["solo"], None, False))
+        # Bad input is refused before anything is written.
+        for bad in ({"tags": ["a,b"]}, {"tags": ["pin"]}, {"tags": "work"}, {"color": "mauve"}):
+            status, data, _ = self.request("POST", "/v1/notes", {"title": "Bad", "body": "z", **bad})
+            self.assertEqual(status, 400, bad)
+        self.assertFalse(any(n["title"] == "Bad" for n in self.state.notes.all()))
+
     def test_notes_search_body_beyond_default_list_window(self):
         folder = Path(self.tmp.name) / "notes"
         (folder / "older.md").write_text('---\ntitle: "Unrelated title"\n---\nNeedle in Markdown\n')

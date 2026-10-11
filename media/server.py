@@ -230,16 +230,50 @@ class State:
                                "ORDER BY created_at,id", (note_id,)).fetchall()
         return {**note, "files": [{"id": f[0], "name": f[1], "mime": f[2], "size": f[3]} for f in files]}
 
+    @staticmethod
+    def _note_tags(body: dict) -> list[str] | None:
+        """The tags sent with a note, or None when none were sent (an update then keeps the old ones)."""
+        tags = body.get("tags")
+        if tags is None:
+            return None
+        if not isinstance(tags, list) or len(tags) > 12 or \
+                any(not isinstance(t, str) or not t.strip() or len(t) > 32 or "," in t for t in tags):
+            raise MediaError("NOTE_INVALID", "Use up to 12 tags of 32 characters, without commas")
+        clean = [t.strip() for t in tags]
+        # a note tagged "pin" is listed as a pin, so it would leave the notes list
+        if any(t.lower() == "pin" for t in clean):
+            raise MediaError("NOTE_INVALID", "\"pin\" is kept for pins; pin the note instead")
+        return clean
+
+    def _note_meta(self, note_id: str, body: dict) -> None:
+        """Colour and pin sent along with a save, applied after it."""
+        color = body.get("color") if isinstance(body.get("color"), str) else None
+        pinned = body.get("pinned") if isinstance(body.get("pinned"), bool) else None
+        if color is not None or pinned is not None:
+            self.notes.set_meta(note_id, color=color, pinned=pinned)
+
+    def _check_color(self, body: dict) -> None:
+        color = body.get("color")
+        if isinstance(color, str) and color and color not in self.notes.COLORS:
+            raise MediaError("NOTE_COLOR", "That colour is not one of the eight")
+
     def note_create(self, body: dict) -> dict:
         title, content = self._note_fields(body)
+        tags = self._note_tags(body)
+        self._check_color(body)
         agent = body.get("agent") if isinstance(body.get("agent"), str) else None
-        return self.note_get(self.notes.create(title, content, agent=agent)["id"])
+        note_id = self.notes.create(title, content, agent=agent, tags=tags)["id"]
+        self._note_meta(note_id, body)
+        return self.note_get(note_id)
 
     def note_update(self, note_id: str, body: dict) -> dict:
         title, content = self._note_fields(body)
+        tags = self._note_tags(body)
+        self._check_color(body)
         revision = self._note_revision(body)
         agent = body.get("agent") if isinstance(body.get("agent"), str) else None
-        self.notes.update(note_id, title, content, revision, agent=agent)
+        self.notes.update(note_id, title, content, revision, agent=agent, tags=tags)
+        self._note_meta(note_id, body)
         return self.note_get(note_id)
 
     def note_delete(self, note_id: str, body: dict) -> dict:
