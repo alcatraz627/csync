@@ -296,6 +296,19 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(status, 400, bad)
         self.assertFalse(any(n["title"] == "Bad" for n in self.state.notes.all()))
 
+    def test_note_save_refuses_a_colour_that_is_not_text_and_a_pin_that_is_not_a_bool(self):
+        for bad in ({"color": 5}, {"color": ["green"]}, {"pinned": "true"}, {"pinned": 1}, {"tags": {"a": 1}}):
+            status, data, _ = self.request("POST", "/v1/notes", {"title": "Typed", "body": "z", **bad})
+            self.assertEqual(status, 400, bad)
+            self.assertEqual(json.loads(data)["code"], "NOTE_INVALID", bad)
+        self.assertFalse(any(n["title"] == "Typed" for n in self.state.notes.all()))
+        status, data, _ = self.request("POST", "/v1/notes", {"title": "Typed", "body": "ok", "color": "green", "pinned": True})
+        note = json.loads(data)["note"]
+        self.assertEqual((status, note.get("color"), note.get("pinned")), (201, "green", True))
+        status, data, _ = self.request("PUT", "/v1/notes/" + note["id"], {"title": "Typed", "body": "ok",
+                                       "pinned": "yes", "expectedRevision": note["revision"]})
+        self.assertEqual(status, 400)
+
     def test_save_after_only_a_pin_elsewhere_is_no_clash(self):
         status, data, _ = self.request("POST", "/v1/notes", {"title": "Pinned later", "body": "words"})
         note = json.loads(data)["note"]
