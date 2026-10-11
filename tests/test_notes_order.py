@@ -1,11 +1,13 @@
 import http.client
 import json
+import os
 import re
 import subprocess
 import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from unittest import mock
 from pathlib import Path
 
 from media.library import Drive, Library
@@ -155,6 +157,50 @@ class OrderTest(unittest.TestCase):
         write_note(self.folder, "W", "2026-01-01T00:00:00Z", pos="NOT OK!")
         self.store.set_meta("E", after="W")
         self.assertEqual(self.ids().index("E"), self.ids().index("W") + 1)
+
+    def commit_on(self, when: str, reason: str) -> None:
+        with mock.patch.dict(os.environ, {"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when}):
+            self.store.commit(reason)
+
+    def edit_times(self) -> dict[str, int]:
+        return {n["id"]: n["updatedAt"] for n in self.store.all()}
+
+    def test_a_move_or_settle_never_changes_an_edit_time(self):
+        # G has two real saves, long ago; the fixtures A..E have one commit each (their import)
+        old = "2026-09-01T09:00:00Z"
+        write_note(self.folder, "G", "2026-08-01T10:00:00Z")
+        self.commit_on(old, "save (phone)")
+        (self.folder / "G.md").write_text((self.folder / "G.md").read_text().replace("body of G", "second words"))
+        self.commit_on(old, "save (phone)")
+        before = self.edit_times()
+        self.assertEqual(before["G"], 1788253200)    # 2026-09-01T09:00:00Z
+        self.store.set_meta("A", after="E")          # the first move settles every note in the group
+        self.assertGreater(len(self.changed_files()), 3)
+        self.store.set_meta("B", after=None)         # a later one-file move
+        self.assertEqual(self.edit_times(), before)
+        # the note count of commits still moves, so a save made on the old revision still clashes
+        self.assertEqual(self.store.revision("G"), 3)
+
+    def test_a_link_note_moves_between_text_notes(self):
+        write_note(self.folder, "L", "2026-10-06T10:00:00Z", url="https://example.com")
+        self.store.commit("link")
+        self.store.set_meta("L", after="E")
+        self.assertEqual(self.ids()[:2], ["E", "L"])
+        self.store.set_meta("A", after="L")
+        self.assertEqual(self.ids()[:3], ["E", "L", "A"])
+        self.store.set_meta("E", after="L")             # a text note under a link note
+        self.assertEqual(self.ids()[:2], ["L", "E"])
+
+    def test_a_real_edit_still_moves_the_edit_time(self):
+        old = "2026-09-01T09:00:00Z"
+        write_note(self.folder, "G", "2026-08-01T10:00:00Z")
+        self.commit_on(old, "save (phone)")
+        (self.folder / "G.md").write_text((self.folder / "G.md").read_text().replace("body of G", "second words"))
+        self.commit_on(old, "save (phone)")
+        self.store.set_meta("G", after=None)
+        self.assertEqual(self.store.read("G")["updatedAt"], 1788253200)
+        self.store.update("G", "G", "third words", self.store.revision("G"))
+        self.assertGreater(self.store.read("G")["updatedAt"], 1788253200 + 86400)
 
 
 class ReminderKeysTest(unittest.TestCase):
