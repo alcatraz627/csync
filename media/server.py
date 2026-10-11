@@ -1989,6 +1989,19 @@ def handler_for(state: State, token: str):
                     if started:
                         state.cast_finished(started["itemId"], item["id"])
                     return self._json(201, {"item": item, "started": bool(started)})
+                if path == "/v1/folders":
+                    body = self._body(4 * 1024)
+                    return self._json(201, {"item": state.library.make_folder(
+                        str(body.get("driveId", "")), str(body.get("path", "")), body.get("name"))})
+                if path == "/v1/files":
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError:
+                        length = 0
+                    self.connection.settimeout(30)
+                    return self._json(201, {"item": state.library.save_file(
+                        query.get("driveId", [""])[0], query.get("path", [""])[0],
+                        query.get("name", [""])[0], length, self.rfile)})
                 if path == "/v1/cache/clean":
                     return self._json(200, state.library.clean_cache())
                 if path.startswith("/v1/covers/") and path.endswith("/use"):

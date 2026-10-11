@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import hmac
 import json
@@ -36,6 +37,18 @@ def _media_file(path: Path) -> bool:
 def _servable(path: Path) -> bool:
     """A file the Pi will hand to the phone: anything Media plays, and pictures."""
     return _media_file(path) or (not path.name.startswith(".") and path.suffix.casefold() in IMAGE_SUFFIXES)
+
+
+def _entry_name(name) -> str:
+    """A file or folder name a person typed, checked so it stays one plain entry in its folder."""
+    if not isinstance(name, str) or not name.strip():
+        raise MediaError("NAME_INVALID", "Type a name", 400, "name")
+    clean = name.strip()
+    if len(clean.encode()) > 240:
+        raise MediaError("NAME_INVALID", "That name is too long", 400, "name")
+    if re.search(r"[/\\\x00-\x1f\x7f]", clean) or clean.startswith(".") or clean.endswith("."):
+        raise MediaError("NAME_INVALID", "Use a plain name: no slashes, and no dot at the start or end", 400, "name")
+    return clean
 
 
 class MediaError(Exception):
@@ -365,7 +378,7 @@ class Library:
             raise MediaError("PAGE_INVALID", "Invalid page")
         try:
             entries = [p for p in folder.iterdir() if not p.is_symlink() and
-                       (p.is_dir() or (p.is_file() and _media_file(p)))]
+                       (p.is_dir() or (p.is_file() and _servable(p)))]
             entries.sort(key=lambda p: (not p.is_dir(), p.name.casefold(), p.name))
             page = []
             for entry in entries[offset:offset + limit]:
@@ -374,7 +387,7 @@ class Library:
                     # How many things opening the folder would list; left out when it cannot be read.
                     try:
                         item["count"] = sum(1 for p in entry.iterdir() if not p.is_symlink() and
-                                            (p.is_dir() or (p.is_file() and _media_file(p))))
+                                            (p.is_dir() or (p.is_file() and _servable(p))))
                     except OSError:
                         pass
                 page.append(item)
@@ -382,6 +395,88 @@ class Library:
             raise MediaError("MOUNT_UNREADABLE", "This folder cannot be read", 403)
         return {"items": page, "nextOffset": offset + limit if offset + limit < len(entries) else None,
                 "total": len(entries)}
+
+    def make_folder(self, drive_id: str, relative: str, name: str) -> dict:
+        """Create a new, empty folder inside an existing one. A name already in use is refused."""
+        clean = _entry_name(name)
+        drive = self._drive(drive_id)
+        parent = self._path(drive, relative)
+        if not parent.is_dir():
+            raise MediaError("NOT_A_FOLDER", "Select a folder", 400)
+        target = parent / clean
+        try:
+            os.mkdir(target, 0o755)
+        except FileExistsError:
+            raise MediaError("NAME_TAKEN", f"{clean} already exists here", 409, "name")
+        except OSError as error:
+            raise self._write_failure(error, "The Pi could not make this folder")
+        return self.describe(drive, target)
+
+    @staticmethod
+    def _write_failure(error: OSError, fallback: str) -> MediaError:
+        if error.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+            return MediaError("DRIVE_READ_ONLY", "This drive does not accept new files", 403)
+        if error.errno == errno.ENOSPC:
+            return MediaError("DRIVE_FULL", "The Pi drive needs more free space for this file", 507)
+        return MediaError("UPLOAD_FAILED", fallback, 503)
+
+    def save_file(self, drive_id: str, relative: str, name: str, length: int, source) -> dict:
+        """Store a video, song or picture sent from the phone in the folder it is browsing.
+
+        Never replaces a file: a name already in use is refused. A send that stops partway
+        leaves nothing behind.
+        """
+        clean = _entry_name(name)
+        if Path(clean).suffix.casefold() not in MEDIA_SUFFIXES | IMAGE_SUFFIXES:
+            raise MediaError("UPLOAD_TYPE", "Choose a video, a song or a picture", 400)
+        if not isinstance(length, int) or length < 1 or length > 16 * 1024**3:
+            raise MediaError("UPLOAD_SIZE", "Choose a file under 16 GB", 400)
+        if not self.upload_lock.acquire(blocking=False):
+            raise MediaError("UPLOAD_BUSY", "Another file is being sent to the Pi", 409)
+        created = finished = False
+        final = None
+        try:
+            drive = self._drive(drive_id)
+            folder = self._path(drive, relative)
+            if not folder.is_dir():
+                raise MediaError("NOT_A_FOLDER", "Select a folder", 400)
+            try:
+                space = os.statvfs(folder)
+            except OSError:
+                raise MediaError("UPLOAD_UNAVAILABLE", "This folder cannot be written to", 503)
+            reserve = 0 if self.fixture_mounts else 1024**3
+            if space.f_bavail * space.f_frsize < length + reserve:
+                raise MediaError("DRIVE_FULL", "The Pi drive needs more free space for this file", 507)
+            final = folder / clean
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(final, flags, 0o644)
+            except FileExistsError:
+                raise MediaError("NAME_TAKEN", f"{clean} already exists here", 409, "name")
+            created = True
+            with os.fdopen(fd, "wb") as output:
+                remaining = length
+                while remaining:
+                    chunk = source.read(min(65536, remaining))
+                    if not chunk:
+                        raise MediaError("UPLOAD_INCOMPLETE", "The phone stopped sending the file", 409)
+                    output.write(chunk)
+                    remaining -= len(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            finished = True
+            return self.describe(drive, final)
+        except OSError as error:
+            raise self._write_failure(error, "The Pi could not save this file")
+        except TimeoutError:
+            raise MediaError("UPLOAD_FAILED", "The Pi could not save this file", 503)
+        finally:
+            if created and not finished and final is not None:
+                try:
+                    final.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            self.upload_lock.release()
 
     def folder_tree(self, drive_id: str, relative: str = "", limit: int = 2000) -> dict:
         """Every file under a folder, at any depth, for saving the folder whole on the phone.
