@@ -78,6 +78,12 @@ func serve() error {
 		}
 		writeJSON(w, peers)
 	})
+	mux.HandleFunc("/switchboard/", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r, token) {
+			return
+		}
+		handleSwitchboard(w, r)
+	})
 	mux.HandleFunc("/send", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)

@@ -1,0 +1,40 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+)
+
+// Runs only where a Switchboard binary is named, since it shells out to the real app.
+func TestSwitchboardRoute(t *testing.T) {
+	if os.Getenv("CSYNC_SWITCHBOARD") == "" {
+		t.Skip("set CSYNC_SWITCHBOARD to a Switchboard binary")
+	}
+	rec := httptest.NewRecorder()
+	handleSwitchboard(rec, httptest.NewRequest(http.MethodGet, "/switchboard/ledger?group=Closed%20proposals&limit=3", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ledger: status %d %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Tab    string `json:"tab"`
+		Groups []struct {
+			Title string            `json:"title"`
+			Total int               `json:"total"`
+			Rows  []json.RawMessage `json:"rows"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if got.Tab != "ledger" || len(got.Groups) != 1 || got.Groups[0].Title != "Closed proposals" || len(got.Groups[0].Rows) != 3 || got.Groups[0].Total < 3 {
+		t.Fatalf("unexpected page: %+v", got)
+	}
+	rec = httptest.NewRecorder()
+	handleSwitchboard(rec, httptest.NewRequest(http.MethodGet, "/switchboard/../../etc", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("an unknown tab must be refused, got %d", rec.Code)
+	}
+}
