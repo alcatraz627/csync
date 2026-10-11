@@ -181,6 +181,16 @@ class OrderTest(unittest.TestCase):
         # the note count of commits still moves, so a save made on the old revision still clashes
         self.assertEqual(self.store.revision("G"), 3)
 
+    def test_a_link_note_moves_between_text_notes(self):
+        write_note(self.folder, "L", "2026-10-06T10:00:00Z", url="https://example.com")
+        self.store.commit("link")
+        self.store.set_meta("L", after="E")
+        self.assertEqual(self.ids()[:2], ["E", "L"])
+        self.store.set_meta("A", after="L")
+        self.assertEqual(self.ids()[:3], ["E", "L", "A"])
+        self.store.set_meta("E", after="L")             # a text note under a link note
+        self.assertEqual(self.ids()[:2], ["L", "E"])
+
     def test_a_real_edit_still_moves_the_edit_time(self):
         old = "2026-09-01T09:00:00Z"
         write_note(self.folder, "G", "2026-08-01T10:00:00Z")

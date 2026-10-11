@@ -415,9 +415,7 @@ class NotesFolder:
         group. Returns the other notes' new file text (the one-time settle of a group nobody has
         arranged yet, one pos line each); the note's own pos is set in `fields`."""
         pinned = fields.get("pinned") == "true"
-        is_url = bool(fields.get("url"))
-        group = [n for n in self.all() if n["id"] != note_id and bool(n.get("pinned")) == pinned
-                 and ("url" in n) == is_url]
+        group = [n for n in self.all() if n["id"] != note_id and bool(n.get("pinned")) == pinned]
         if after is not None and after not in {n["id"] for n in group}:
             raise MediaError("NOTE_INVALID", "Move the note after a note in the same pinned group", 400)
 
