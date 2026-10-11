@@ -261,6 +261,15 @@ class State:
         if isinstance(color, str) and color and color not in self.notes.COLORS:
             raise MediaError("NOTE_COLOR", "That colour is not one of the eight")
 
+    def note_meta(self, note_id: str, body: dict, color: str | None, pinned: bool | None) -> dict:
+        """Colour, pin and place in the shared order; `after` is a note id, or null for the top of the group."""
+        extra = {}
+        if "after" in body:
+            if body["after"] is not None and not isinstance(body["after"], str):
+                raise MediaError("NOTE_INVALID", "After must be a note id or null")
+            extra["after"] = body["after"]
+        return self.notes.set_meta(note_id, color=color, pinned=pinned, **extra)
+
     def note_create(self, body: dict) -> dict:
         title, content = self._note_fields(body)
         tags = self._note_tags(body)
@@ -2057,12 +2066,12 @@ def handler_for(state: State, token: str):
                 body = self._body(4 * 1024)
                 return self._json(200, {"note": state.notes.resolve(note_id, str(body.get("keep", "")))})
             elif self.command == "PUT" and path.startswith("/v1/notes/") and path.endswith("/meta"):
-                # colour and pin only, from the phone's long-press menu
+                # colour, pin, place in the order, from the phone's long-press menu
                 note_id = path.removeprefix("/v1/notes/").removesuffix("/meta")
                 body = self._body(4 * 1024)
                 color = body.get("color") if isinstance(body.get("color"), str) else None
                 pinned = body.get("pinned") if isinstance(body.get("pinned"), bool) else None
-                return self._json(200, {"note": state.notes.set_meta(note_id, color=color, pinned=pinned)})
+                return self._json(200, {"note": state.note_meta(note_id, body, color, pinned)})
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
                 note_id = path.removeprefix("/v1/notes/")
                 body = self._body(320 * 1024)
