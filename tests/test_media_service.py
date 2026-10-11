@@ -296,6 +296,30 @@ class MediaServiceTest(unittest.TestCase):
             self.assertEqual(status, 400, bad)
         self.assertFalse(any(n["title"] == "Bad" for n in self.state.notes.all()))
 
+    def test_save_after_only_a_pin_elsewhere_is_no_clash(self):
+        status, data, _ = self.request("POST", "/v1/notes", {"title": "Pinned later", "body": "words"})
+        note = json.loads(data)["note"]
+        item = "/v1/notes/" + note["id"]
+        self.request("PUT", item + "/meta", {"pinned": True})
+        # the phone still holds revision 1 and edits the words
+        status, data, _ = self.request("PUT", item, {"title": "Pinned later", "body": "new words",
+                                       "expectedRevision": note["revision"]})
+        saved = json.loads(data)["note"]
+        self.assertEqual((status, saved["body"], saved["conflicted"], saved.get("pinned")), (200, "new words", False, True))
+
+    def test_unknown_header_lines_survive_a_pi_save(self):
+        folder = Path(self.tmp.name) / "notes"
+        status, data, _ = self.request("POST", "/v1/notes", {"title": "Keys", "body": "x"})
+        note = json.loads(data)["note"]
+        p = folder / (note["id"] + ".md")
+        text = p.read_text().replace("\n---\n", '\nmood: "calm: low"\nempty:\n---\n', 1)
+        p.write_text(text)
+        subprocess.run(["git", "commit", "-qam", "hand edit"], cwd=folder)
+        self.request("PUT", "/v1/notes/" + note["id"], {"title": "Keys", "body": "y", "expectedRevision": 2})
+        after = p.read_text()
+        self.assertIn('\nmood: "calm: low"\n', after)
+        self.assertIn("\nempty:\n", after)
+
     def test_note_history_lists_versions_and_reads_an_old_one(self):
         status, data, _ = self.request("POST", "/v1/notes", {"title": "Versions", "body": "first words"})
         note = json.loads(data)["note"]

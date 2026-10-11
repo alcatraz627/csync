@@ -54,7 +54,8 @@ def parse(text: str) -> tuple[dict, str]:
                 if ":" not in line:
                     continue
                 key, value = line.split(":", 1)
-                fields[key.strip()] = _unquote(value.strip())
+                # a key none of the apps own is kept exactly as written (quotes included), as Switchboard does
+                fields[key.strip()] = _unquote(value.strip()) if key.strip() in KEY_ORDER else value.strip()
             body = text[end + 5:]
     body = body.strip("\n")
     if "title" in fields:
@@ -70,6 +71,11 @@ def render(fields: dict, body: str) -> str:
     lines = ["---"]
     for key in list(KEY_ORDER) + [k for k in fields if k not in KEY_ORDER]:
         value = fields.get(key)
+        if key not in KEY_ORDER:
+            # written back as it was read, empty or not
+            if value is not None:
+                lines.append(f"{key}: {value}".rstrip())
+            continue
         # the title is always written, empty or not: a file without one reads its first body line as the title
         if value in (None, "", False) and key != "title":
             continue
@@ -173,6 +179,15 @@ class NotesFolder:
                 rows.append({"sha": parts[0], "at": int(parts[1]), "reason": parts[2]})
         return rows
 
+    def _body_at(self, note_id: str, revision: int) -> str | None:
+        """The note's words at the revision a writer started from (1 is its first save), or None.
+        When they equal today's words, only a pin, colour or tag changed since, which is no clash."""
+        versions = self.history(note_id)
+        if not 1 <= revision <= len(versions):
+            return None
+        shown = self._git("show", f"{versions[len(versions) - revision]['sha']}:{note_id}.md")
+        return parse(shown.stdout)[1] if shown.returncode == 0 else None
+
     def version(self, note_id: str, sha: str) -> dict:
         """The note as it was saved at one version from history, for reading or bringing back."""
         self.path(note_id)
@@ -261,7 +276,7 @@ class NotesFolder:
         if fields is None:
             raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
         who = agent or "phone"
-        if self.revision(note_id) != expected and body != current:
+        if self.revision(note_id) != expected and body != current and self._body_at(note_id, expected) != current:
             body = f"<<<<<<< {who}\n{body}\n=======\n{current}\n>>>>>>> {self.author}\n"
             reason = f"merge: both sides kept ({who})"
         else:
