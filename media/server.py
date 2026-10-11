@@ -27,6 +27,7 @@ from .camera import Camera
 from .instagram import Instagram
 from .library import Drive, Library, MediaError
 from .notes_store import NotesFolder
+from .reminders_store import RemindersFolder
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
 SHOW_IMAGE_CODECS = {"mjpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
@@ -77,6 +78,8 @@ class State:
         self.database = database
         # The folder the Mac and the phone share; ~/Notes on the Pi, a scratch folder in tests.
         self.notes = NotesFolder(notes_folder or Path.home() / "Notes")
+        # Timer and reminder runs and their templates live in .reminders/ inside the same folder.
+        self.reminders = RemindersFolder(self.notes)
         self.mpv_socket = mpv_socket
         self.player_command = player_command
         self.camera = camera
@@ -260,6 +263,23 @@ class State:
             raise MediaError("NOTE_INVALID", "Pinned must be true or false")
         if isinstance(color, str) and color and color not in self.notes.COLORS:
             raise MediaError("NOTE_COLOR", "That colour is not one of the eight")
+
+    def note_meta(self, note_id: str, body: dict, color: str | None, pinned: bool | None) -> dict:
+        """Colour, pin, place in the shared order (`after` is a note id, or null for the top of the group) and
+        the reminder keys remindAt (epoch seconds), remindRepeat and remindOn."""
+        extra = {}
+        if "after" in body:
+            if body["after"] is not None and not isinstance(body["after"], str):
+                raise MediaError("NOTE_INVALID", "After must be a note id or null")
+            extra["after"] = body["after"]
+        for key, field, kinds in (("remindAt", "remind_at", (int, type(None))),
+                                  ("remindRepeat", "remind_repeat", (str, type(None))),
+                                  ("remindOn", "remind_on", (str, type(None)))):
+            if key in body:
+                if not isinstance(body[key], kinds) or isinstance(body[key], bool):
+                    raise MediaError("NOTE_INVALID", f"{key} has the wrong type")
+                extra[field] = body[key]
+        return self.notes.set_meta(note_id, color=color, pinned=pinned, **extra)
 
     def note_create(self, body: dict) -> dict:
         title, content = self._note_fields(body)
@@ -1839,6 +1859,10 @@ def handler_for(state: State, token: str):
                     return self._json(200, {"entries": state.history()})
                 if path == "/v1/notes":
                     return self._json(200, {"notes": state.notes_list(query.get("q", [""])[0])})
+                if path == "/v1/runs":
+                    return self._json(200, state.reminders.runs())
+                if path == "/v1/templates":
+                    return self._json(200, {"templates": state.reminders.templates()})
                 if path == "/v1/pins":
                     return self._json(200, {"pins": state.pins_list()})
                 if len(parts) == 5 and parts[1:3] == ["v1", "pins"] and parts[4] == "file":
@@ -1904,6 +1928,14 @@ def handler_for(state: State, token: str):
                 if path.startswith("/v1/camera/captures/") and state.camera:
                     return self._capture(path.rsplit("/", 1)[-1])
             elif self.command == "POST":
+                if path == "/v1/runs":
+                    run, created = state.reminders.run_add(self._body(4 * 1024))
+                    return self._json(201 if created else 200, {"run": run})
+                if len(parts) == 5 and parts[1:3] == ["v1", "runs"] and parts[4] == "stop":
+                    return self._json(200, {"run": state.reminders.run_stop(parts[3])})
+                if path == "/v1/templates":
+                    template, created = state.reminders.template_add(self._body(4 * 1024))
+                    return self._json(201 if created else 200, {"template": template})
                 if path == "/v1/notes":
                     return self._json(201, {"note": state.note_create(self._body(320 * 1024))})
                 if path == "/v1/pins":
@@ -2037,6 +2069,14 @@ def handler_for(state: State, token: str):
             elif self.command == "PUT" and path.startswith("/v1/displays/"):
                 return self._json(200, {"display": state.display_update(
                     path.removeprefix("/v1/displays/"), self._body(4096))})
+            elif self.command == "PUT" and len(parts) == 5 and parts[1:3] == ["v1", "runs"] and parts[4] == "state":
+                return self._json(200, {"run": state.reminders.run_state(parts[3], self._body(4 * 1024))})
+            elif self.command == "PUT" and len(parts) == 4 and parts[1:3] == ["v1", "devices"]:
+                return self._json(200, state.reminders.device_set(parts[3], self._body(8 * 1024)))
+            elif self.command == "PUT" and len(parts) == 4 and parts[1:3] == ["v1", "templates"]:
+                return self._json(200, {"template": state.reminders.template_update(parts[3], self._body(4 * 1024))})
+            elif self.command == "DELETE" and len(parts) == 4 and parts[1:3] == ["v1", "templates"]:
+                return self._json(200, state.reminders.template_delete(parts[3]))
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/pins/"):
                 pin_id = path.removeprefix("/v1/pins/")
                 body = self._body(8 * 1024)
@@ -2057,12 +2097,12 @@ def handler_for(state: State, token: str):
                 body = self._body(4 * 1024)
                 return self._json(200, {"note": state.notes.resolve(note_id, str(body.get("keep", "")))})
             elif self.command == "PUT" and path.startswith("/v1/notes/") and path.endswith("/meta"):
-                # colour and pin only, from the phone's long-press menu
+                # colour, pin, place in the order, from the phone's long-press menu
                 note_id = path.removeprefix("/v1/notes/").removesuffix("/meta")
                 body = self._body(4 * 1024)
                 color = body.get("color") if isinstance(body.get("color"), str) else None
                 pinned = body.get("pinned") if isinstance(body.get("pinned"), bool) else None
-                return self._json(200, {"note": state.notes.set_meta(note_id, color=color, pinned=pinned)})
+                return self._json(200, {"note": state.note_meta(note_id, body, color, pinned)})
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/notes/"):
                 note_id = path.removeprefix("/v1/notes/")
                 body = self._body(320 * 1024)
