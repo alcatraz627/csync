@@ -184,7 +184,10 @@ class NotesFolder:
         self._git("commit", "-q", "-m", reason)
         self._counts = None
 
-    _counts: tuple[str, dict[str, int], dict[str, int]] | None = None
+    # Commits that only change where a note sits, so a reorder never reads as an edit.
+    POS_ONLY_REASONS = ("move", "order: migrate")
+
+    _counts: tuple[str, dict[str, int], dict[str, int], dict[str, int]] | None = None
 
     def _head_stamp(self) -> str:
         """Changes whenever HEAD moves, here or by a push, without running git."""
@@ -202,27 +205,34 @@ class NotesFolder:
         if self._counts and self._counts[0] == head:
             return self._counts[1]
         counts: dict[str, int] = {}
+        edits: dict[str, int] = {}
         latest: dict[str, int] = {}
-        when = 0
-        # newest first, so the first time a file appears is its last edit
-        for line in self._git("log", "--format=@%ct", "--name-only", "--", "*.md").stdout.splitlines():
-            if line.startswith("@") and line[1:].isdigit():
-                when = int(line[1:])
+        when, quiet = 0, False
+        # newest first, so the first edit that names a file is its last edit
+        for line in self._git("log", "--format=@%ct%x09%s", "--name-only", "--", "*.md").stdout.splitlines():
+            if line.startswith("@"):
+                stamp, _, reason = line[1:].partition("\t")
+                if stamp.isdigit():
+                    when, quiet = int(stamp), reason in self.POS_ONLY_REASONS
             elif line.endswith(".md"):
-                counts[line[:-3]] = counts.get(line[:-3], 0) + 1
-                latest.setdefault(line[:-3], when)
+                note = line[:-3]
+                counts[note] = counts.get(note, 0) + 1
+                if not quiet:
+                    edits[note] = edits.get(note, 0) + 1
+                    latest.setdefault(note, when)
         # one assignment, so a request thread never reads counts from one HEAD and times from another
-        self._counts = (head, counts, latest)
+        self._counts = (head, counts, latest, edits)
         return counts
 
     def edited_at(self, note_id: str, p: Path, created: int | None = None) -> int:
         """When the note was last edited: its last commit, else the file's time.
         The file time alone lies after a sync or checkout touches every file, and a
         note with one commit was only imported, so its own created time is truer.
-        A note no commit has seen yet (just written) keeps its file time."""
+        A note no commit has seen yet (just written) keeps its file time. A move or the settle
+        that goes with it only changes `pos`, so those commits are left out of both counts."""
         self._commit_counts()
         snap = self._counts   # one read: counts and times from the same HEAD
-        n = snap[1].get(note_id, 0) if snap else 0
+        n = snap[3].get(note_id, 0) if snap else 0
         latest = snap[2] if snap else {}
         if n == 1 and created:
             return created
