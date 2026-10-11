@@ -27,6 +27,7 @@ from .camera import Camera
 from .instagram import Instagram
 from .library import Drive, Library, MediaError
 from .notes_store import NotesFolder
+from .reminders_store import RemindersFolder
 
 NOTE_FILE_LIMIT = 20 * 1024 * 1024
 SHOW_IMAGE_CODECS = {"mjpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
@@ -77,6 +78,8 @@ class State:
         self.database = database
         # The folder the Mac and the phone share; ~/Notes on the Pi, a scratch folder in tests.
         self.notes = NotesFolder(notes_folder or Path.home() / "Notes")
+        # Timer and reminder runs and their templates live in .reminders/ inside the same folder.
+        self.reminders = RemindersFolder(self.notes)
         self.mpv_socket = mpv_socket
         self.player_command = player_command
         self.camera = camera
@@ -1856,6 +1859,10 @@ def handler_for(state: State, token: str):
                     return self._json(200, {"entries": state.history()})
                 if path == "/v1/notes":
                     return self._json(200, {"notes": state.notes_list(query.get("q", [""])[0])})
+                if path == "/v1/runs":
+                    return self._json(200, state.reminders.runs())
+                if path == "/v1/templates":
+                    return self._json(200, {"templates": state.reminders.templates()})
                 if path == "/v1/pins":
                     return self._json(200, {"pins": state.pins_list()})
                 if len(parts) == 5 and parts[1:3] == ["v1", "pins"] and parts[4] == "file":
@@ -1921,6 +1928,14 @@ def handler_for(state: State, token: str):
                 if path.startswith("/v1/camera/captures/") and state.camera:
                     return self._capture(path.rsplit("/", 1)[-1])
             elif self.command == "POST":
+                if path == "/v1/runs":
+                    run, created = state.reminders.run_add(self._body(4 * 1024))
+                    return self._json(201 if created else 200, {"run": run})
+                if len(parts) == 5 and parts[1:3] == ["v1", "runs"] and parts[4] == "stop":
+                    return self._json(200, {"run": state.reminders.run_stop(parts[3])})
+                if path == "/v1/templates":
+                    template, created = state.reminders.template_add(self._body(4 * 1024))
+                    return self._json(201 if created else 200, {"template": template})
                 if path == "/v1/notes":
                     return self._json(201, {"note": state.note_create(self._body(320 * 1024))})
                 if path == "/v1/pins":
@@ -2054,6 +2069,14 @@ def handler_for(state: State, token: str):
             elif self.command == "PUT" and path.startswith("/v1/displays/"):
                 return self._json(200, {"display": state.display_update(
                     path.removeprefix("/v1/displays/"), self._body(4096))})
+            elif self.command == "PUT" and len(parts) == 5 and parts[1:3] == ["v1", "runs"] and parts[4] == "state":
+                return self._json(200, {"run": state.reminders.run_state(parts[3], self._body(4 * 1024))})
+            elif self.command == "PUT" and len(parts) == 4 and parts[1:3] == ["v1", "devices"]:
+                return self._json(200, state.reminders.device_set(parts[3], self._body(8 * 1024)))
+            elif self.command == "PUT" and len(parts) == 4 and parts[1:3] == ["v1", "templates"]:
+                return self._json(200, {"template": state.reminders.template_update(parts[3], self._body(4 * 1024))})
+            elif self.command == "DELETE" and len(parts) == 4 and parts[1:3] == ["v1", "templates"]:
+                return self._json(200, state.reminders.template_delete(parts[3]))
             elif self.command in ("PUT", "DELETE") and path.startswith("/v1/pins/"):
                 pin_id = path.removeprefix("/v1/pins/")
                 body = self._body(8 * 1024)
