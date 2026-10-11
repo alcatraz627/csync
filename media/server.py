@@ -253,7 +253,11 @@ class State:
             self.notes.set_meta(note_id, color=color, pinned=pinned)
 
     def _check_color(self, body: dict) -> None:
-        color = body.get("color")
+        color, pinned = body.get("color"), body.get("pinned")
+        if color is not None and not isinstance(color, str):
+            raise MediaError("NOTE_INVALID", "The colour must be text")
+        if pinned is not None and not isinstance(pinned, bool):
+            raise MediaError("NOTE_INVALID", "Pinned must be true or false")
         if isinstance(color, str) and color and color not in self.notes.COLORS:
             raise MediaError("NOTE_COLOR", "That colour is not one of the eight")
 
