@@ -185,7 +185,7 @@ class NotesFolder:
         self._counts = None
 
     # Commits that only change where a note sits, so a reorder never reads as an edit.
-    POS_ONLY_REASONS = ("move", "order: migrate")
+    POS_ONLY_REASONS = ("move", "order: migrate", "pictures: migrate")
 
     _counts: tuple[str, dict[str, int], dict[str, int], dict[str, int]] | None = None
 
@@ -538,5 +538,59 @@ class NotesFolder:
         if self.revision(note_id) != expected:
             raise MediaError(code, "This note changed elsewhere. Reload it before deleting", 409)
         p.unlink()
+        for _, f in self.pictures(note_id):
+            f.unlink(missing_ok=True)
         self.commit("delete")
         return {"deleted": True, "id": note_id}
+
+    # ── pictures ──
+    # A note's pictures are plain files in attachments/ next to the notes, named for the note,
+    # so the Mac and the browser file manager read the same path the phone writes.
+    PICTURE_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+    @property
+    def attachments(self) -> Path:
+        return self.folder / "attachments"
+
+    def picture_path(self, note_id: str, image_id: str) -> Path:
+        if not ID_RE.fullmatch(note_id) or not self.PICTURE_ID_RE.fullmatch(image_id):
+            raise MediaError("IMAGE_NOT_FOUND", "This note image is unavailable", 404)
+        return self.attachments / f"{note_id}-{image_id}.png"
+
+    def pictures(self, note_id: str) -> list[tuple[str, Path]]:
+        """The note's pictures as (image id, file), oldest first."""
+        if not ID_RE.fullmatch(note_id) or not self.attachments.is_dir():
+            return []
+        head, found = note_id + "-", []
+        for f in self.attachments.glob(head + "*.png"):
+            image_id = f.name[len(head):-4]
+            if self.PICTURE_ID_RE.fullmatch(image_id) and f.is_file():
+                found.append((f.stat().st_mtime, image_id, f))
+        return [(i, f) for _, i, f in sorted(found)]
+
+    def picture_counts(self) -> dict[str, int]:
+        """Pictures per note, for a list that says how many each keeps."""
+        names = [f.name for f in self.attachments.glob("*.png")] if self.attachments.is_dir() else []
+        ids = {p.stem for p in self.folder.glob("*.md")}
+        counts: dict[str, int] = {}
+        for name in names:
+            stem = name[:-4]
+            for note_id in ids:
+                if stem.startswith(note_id + "-") and self.PICTURE_ID_RE.fullmatch(stem[len(note_id) + 1:]):
+                    counts[note_id] = counts.get(note_id, 0) + 1
+        return counts
+
+    def add_picture(self, note_id: str, image_id: str, data: bytes, reason: str = "picture") -> Path:
+        f = self.picture_path(note_id, image_id)
+        self.attachments.mkdir(exist_ok=True)
+        f.write_bytes(data)
+        self.commit(reason)
+        return f
+
+    def remove_picture(self, note_id: str, image_id: str) -> bool:
+        f = self.picture_path(note_id, image_id)
+        if not f.is_file():
+            return False
+        f.unlink()
+        self.commit("picture removed")
+        return True
