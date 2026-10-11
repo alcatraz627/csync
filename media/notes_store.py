@@ -267,6 +267,40 @@ class NotesFolder:
 
     COLORS = ("red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
 
+    @staticmethod
+    def settle(text: str, keep: str) -> str:
+        """Every clash block settled to its first side, its second, or both (first then second);
+        text outside the blocks kept, an unclosed block kept whole. Same rules as Switchboard."""
+        out, first, second, part = [], [], [], "out"
+        for line in text.split("\n"):
+            if part == "out" and (line.startswith("<<<<<<< ") or line == "<<<<<<<"):
+                part, first, second = "first", [], []
+            elif part == "out":
+                out.append(line)
+            elif part == "first" and line == "=======":
+                part = "second"
+            elif part == "first":
+                first.append(line)
+            elif line.startswith(">>>>>>> ") or line == ">>>>>>>":
+                part = "out"
+                out += second if keep == "second" else first if keep == "first" else first + second
+            else:
+                second.append(line)
+        if part != "out":
+            out += first + second
+        return "\n".join(out)
+
+    def resolve(self, note_id: str, keep: str) -> dict:
+        """Settles a two-version note on the Pi; it reaches the Mac on its next sync."""
+        if keep not in ("first", "second", "both"):
+            raise MediaError("NOTE_KEEP", "Keep first, second or both", 400)
+        p = self.path(note_id)
+        if not p.exists():
+            raise MediaError("NOTE_NOT_FOUND", "This note is no longer available", 404)
+        fields, body = parse(p.read_text(encoding="utf-8"))
+        self._write(note_id, fields, self.settle(body, keep), f"resolve: kept {keep}")
+        return self.read(note_id)
+
     def set_meta(self, note_id: str, color: str | None = None, pinned: bool | None = None) -> dict:
         """Colour and pin only: no revision check, since neither can lose anyone's writing.
         color "" clears it; None leaves it as it is."""

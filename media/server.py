@@ -2006,6 +2006,11 @@ def handler_for(state: State, token: str):
                 return self._json(200, state.note_image_delete(parts[3], parts[5]))
             elif self.command == "DELETE" and path.startswith("/v1/camera/captures/") and state.camera:
                 return self._json(200, state.camera.delete_capture(path.rsplit("/", 1)[-1]))
+            elif self.command == "PUT" and path.startswith("/v1/notes/") and path.endswith("/resolve"):
+                # settle a two-version note: keep the first side, the second, or both
+                note_id = path.removeprefix("/v1/notes/").removesuffix("/resolve")
+                body = self._body(4 * 1024)
+                return self._json(200, {"note": state.notes.resolve(note_id, str(body.get("keep", "")))})
             elif self.command == "PUT" and path.startswith("/v1/notes/") and path.endswith("/meta"):
                 # colour and pin only, from the phone's long-press menu
                 note_id = path.removeprefix("/v1/notes/").removesuffix("/meta")
