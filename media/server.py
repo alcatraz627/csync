@@ -224,6 +224,8 @@ class State:
             kept = dict(db.execute(
                 "SELECT note_id,count(*) FROM (SELECT note_id FROM note_images UNION ALL "
                 "SELECT note_id FROM note_files) GROUP BY note_id").fetchall())
+        for note_id, count in self.notes.picture_counts().items():
+            kept[note_id] = kept.get(note_id, 0) + count
         return [{**{key: value for key, value in n.items() if key != "body"}, "items": kept.get(n["id"], 0)} for n in notes]
 
     def note_get(self, note_id: str) -> dict:
@@ -543,24 +545,31 @@ class State:
                 raise MediaError("PIN_CONFLICT", "This pin changed elsewhere. Reload it before deleting", 409)
             raise
 
+    # A note's pictures are files under attachments/ in the notes folder (notes_store.py).
+    # Pictures an older Pi kept in the database are still read until migrate_note_pictures moves them.
     def note_images(self, note_id: str) -> list[dict]:
         self.note_get(note_id)
+        found = [{"id": i, "bytes": f.stat().st_size, "createdAt": int(f.stat().st_mtime),
+                  "path": f"attachments/{f.name}"} for i, f in self.notes.pictures(note_id)]
         with self._db() as db:
             rows = db.execute("SELECT id,length(data),created_at FROM note_images WHERE note_id=? ORDER BY created_at,id",
                               (note_id,)).fetchall()
-        return [{"id": row[0], "bytes": row[1], "createdAt": row[2]} for row in rows]
+        return found + [{"id": row[0], "bytes": row[1], "createdAt": row[2]} for row in rows]
 
     def note_image_add(self, note_id: str, data: bytes) -> dict:
         if not 8 <= len(data) <= 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
             raise MediaError("IMAGE_INVALID", "Choose a PNG image under 1 MB")
         self.note_get(note_id)
-        image_id, now = str(uuid.uuid4()), int(time.time())
-        with self._db() as db:
-            db.execute("INSERT INTO note_images VALUES(?,?,?,?)", (image_id, note_id, data, now))
-        return {"id": image_id, "bytes": len(data), "createdAt": now}
+        image_id, now = uuid.uuid4().hex[:12], int(time.time())
+        f = self.notes.add_picture(note_id, image_id, data)
+        return {"id": image_id, "bytes": len(data), "createdAt": now, "path": f"attachments/{f.name}"}
 
     def note_image_get(self, note_id: str, image_id: str) -> bytes:
         self.note_get(note_id)
+        try:
+            return self.notes.picture_path(note_id, image_id).read_bytes()
+        except OSError:
+            pass
         with self._db() as db:
             row = db.execute("SELECT data FROM note_images WHERE note_id=? AND id=?", (note_id, image_id)).fetchone()
         if row is None:
@@ -569,11 +578,37 @@ class State:
 
     def note_image_delete(self, note_id: str, image_id: str) -> dict:
         self.note_get(note_id)
+        removed = self.notes.remove_picture(note_id, image_id) if self.notes.PICTURE_ID_RE.fullmatch(image_id) else False
         with self._db() as db:
-            removed = db.execute("DELETE FROM note_images WHERE note_id=? AND id=?", (note_id, image_id)).rowcount
+            removed = db.execute("DELETE FROM note_images WHERE note_id=? AND id=?", (note_id, image_id)).rowcount or removed
         if not removed:
             raise MediaError("IMAGE_NOT_FOUND", "This picture is no longer in the note", 404)
         return {"deleted": True, "id": image_id}
+
+    def migrate_note_pictures(self) -> dict:
+        """Move pictures kept in the database into the notes folder and point the notes at them.
+        A note line that names the Pi path becomes the relative file path. Safe to run again."""
+        with self._db() as db:
+            rows = db.execute("SELECT id,note_id,data FROM note_images").fetchall()
+        moved = rewritten = 0
+        for image_id, note_id, data in rows:
+            if not self.notes.PICTURE_ID_RE.fullmatch(image_id) or not self.notes.path(note_id).exists():
+                continue
+            f = self.notes.picture_path(note_id, image_id)
+            if not f.exists():
+                self.notes.attachments.mkdir(exist_ok=True)
+                f.write_bytes(data)
+            old, new = f"/v1/notes/{note_id}/images/{image_id}", f"attachments/{f.name}"
+            text = self.notes.path(note_id).read_text(encoding="utf-8")
+            if old in text:
+                self.notes.path(note_id).write_text(text.replace(old, new), encoding="utf-8")
+                rewritten += 1
+            with self._db() as db:
+                db.execute("DELETE FROM note_images WHERE id=?", (image_id,))
+            moved += 1
+        if moved:
+            self.notes.commit("pictures: migrate")
+        return {"moved": moved, "rewritten": rewritten}
 
     def _observe_displays(self) -> list[str]:
         """Remember every connected screen and return their ids, the one in use first."""
@@ -2224,7 +2259,13 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--bind", default="tailscale", help="tailscale or a Tailscale IPv4 address")
     parser.add_argument("--port", type=int, default=8792)
+    parser.add_argument("--migrate-note-pictures", action="store_true",
+                        help="move note pictures from the database into the notes folder, then exit")
     args = parser.parse_args()
+    if args.migrate_note_pictures:
+        library, token, database, mpv_socket, player_command, captures = load_config(Path(args.config))
+        print(json.dumps(State(library, database, mpv_socket, player_command, Camera(captures)).migrate_note_pictures()))
+        return
     if args.bind == "tailscale":
         args.bind = subprocess.check_output(["tailscale", "ip", "-4"], text=True, timeout=5).strip()
     if args.bind in ("0.0.0.0", "::", "127.0.0.1") or not args.bind.startswith("100."):
