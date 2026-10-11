@@ -54,8 +54,13 @@ func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 			args = append(args, "--"+k, v)
 		}
 	}
-	if !switchboardCurrent("no list tab named") {
-		http.Error(w, `{"error":"Switchboard on this Mac is too old to share its tabs; update it"}`, http.StatusConflict)
+	// the phone's own tabs came later than --json, so they need a build that has them
+	marker := "no list tab named"
+	if tab == "usage" || tab == "bulbs" || tab == "agents" {
+		marker = "needs a --value"
+	}
+	if !switchboardCurrent(marker) {
+		http.Error(w, `{"error":"Switchboard on this Mac is too old to share this tab; update it"}`, http.StatusConflict)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
