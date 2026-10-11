@@ -5,6 +5,7 @@ package main
 // exactly the rows the Mac panel draws.
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"os"
@@ -37,6 +38,12 @@ func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 		if v := q.Get(k); v != "" {
 			args = append(args, "--"+k, v)
 		}
+	}
+	// a Switchboard built before --json ignores the flag and launches as a second app,
+	// which displaced the owner's running one once; look for the export in the binary first
+	if bin, err := os.ReadFile(switchboardBinary()); err != nil || !bytes.Contains(bin, []byte("no list tab named")) {
+		http.Error(w, `{"error":"Switchboard on this Mac is too old to share its tabs; update it"}`, http.StatusConflict)
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
