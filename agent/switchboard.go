@@ -7,6 +7,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,8 +28,20 @@ func switchboardBinary() string {
 	return filepath.Join(home, "Applications", "Switchboard.app", "Contents", "MacOS", "Switchboard")
 }
 
+// switchboardCurrent reports whether the installed Switchboard knows the headless exports.
+// A build from before them ignores the flags and launches as a second app, which once
+// displaced the owner's running one, so look for the export in the binary first.
+func switchboardCurrent(marker string) bool {
+	bin, err := os.ReadFile(switchboardBinary())
+	return err == nil && bytes.Contains(bin, []byte(marker))
+}
+
 func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 	tab := strings.TrimPrefix(r.URL.Path, "/switchboard/")
+	if tab == "act" {
+		handleSwitchboardAct(w, r)
+		return
+	}
 	if !switchboardTabs[tab] {
 		http.Error(w, `{"error":"no such Switchboard tab"}`, http.StatusNotFound)
 		return
@@ -39,9 +53,7 @@ func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 			args = append(args, "--"+k, v)
 		}
 	}
-	// a Switchboard built before --json ignores the flag and launches as a second app,
-	// which displaced the owner's running one once; look for the export in the binary first
-	if bin, err := os.ReadFile(switchboardBinary()); err != nil || !bytes.Contains(bin, []byte("no list tab named")) {
+	if !switchboardCurrent("no list tab named") {
 		http.Error(w, `{"error":"Switchboard on this Mac is too old to share its tabs; update it"}`, http.StatusConflict)
 		return
 	}
@@ -49,6 +61,49 @@ func handleSwitchboard(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, switchboardBinary(), args...).Output()
 	if err != nil {
+		http.Error(w, `{"error":"Switchboard did not answer on this Mac"}`, http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(out)
+}
+
+// handleSwitchboardAct presses one row's button on the Mac, for the phone: POST {tab, key,
+// button, confirmed}. Switchboard's own answer (ok, a failure line, or a question to confirm)
+// goes back as is, so the phone shows the Mac's words.
+func handleSwitchboardAct(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST only"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	var ask struct {
+		Tab, Key, Button string
+		Confirmed        bool
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&ask); err != nil || ask.Key == "" {
+		http.Error(w, `{"error":"send tab, key and button"}`, http.StatusBadRequest)
+		return
+	}
+	if !switchboardTabs[ask.Tab] {
+		http.Error(w, `{"error":"no such Switchboard tab"}`, http.StatusNotFound)
+		return
+	}
+	if !switchboardCurrent("no longer on the Mac; refresh the list") {
+		http.Error(w, `{"error":"Switchboard on this Mac is too old to act from the phone; update it"}`, http.StatusConflict)
+		return
+	}
+	args := []string{"--act", ask.Tab, "--key", ask.Key}
+	if ask.Button != "" {
+		args = append(args, "--button", ask.Button)
+	}
+	if ask.Confirmed {
+		args = append(args, "--confirmed")
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	// Switchboard exits non-zero for a refusal or a failed button but still prints its answer.
+	out, _ := exec.CommandContext(ctx, switchboardBinary(), args...).Output()
+	if !json.Valid(out) {
 		http.Error(w, `{"error":"Switchboard did not answer on this Mac"}`, http.StatusBadGateway)
 		return
 	}
